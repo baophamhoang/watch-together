@@ -203,6 +203,12 @@ export function useRoom(
 
     beatAction.onMessage = (incoming, {peerId}) => {
       setStatus('connected')
+      // Recorded for EVERY beat, before the host branch below returns. A peer that
+      // loses a host tie demotes itself here, and if it had not already recorded
+      // who the winner is, the peer gate on state and roster would drop the new
+      // host's broadcasts until its next heartbeat.
+      const previousHost = hostIdRef.current
+      hostIdRef.current = peerId
       if (isHostRef.current) {
         // Two peers claimed the room at once; both sides resolve it identically.
         if (resolveHostTie(selfId, peerId) === 'demote') demote()
@@ -213,8 +219,7 @@ export function useRoom(
       // room claim it after HOST_CLAIM_MS, broadcast a roster nobody should
       // trust, and only then get demoted on hearing the real host.
       sawHostRef.current = true
-      const isNewHost = hostIdRef.current !== peerId
-      hostIdRef.current = peerId
+      const isNewHost = previousHost !== peerId
       setBeat(incoming)
       if (isNewHost) {
         samplesRef.current = []

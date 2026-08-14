@@ -127,6 +127,10 @@ test('two peers converge on the same playback position', async ({browser}) => {
   expect(a.position, 'host position').not.toBeNull()
   expect(b.position, 'guest position').not.toBeNull()
 
+  // A ready-but-idle player reports 0, not null, so without this the drift
+  // check passes vacuously when nothing is playing.
+  expect(a.position).toBeGreaterThan(0)
+
   // Subtracting the wall-clock gap between the two reads, or that gap alone
   // registers as fake drift. The non-null assertions are safe here: the
   // expect() calls above already failed the test if either was null.

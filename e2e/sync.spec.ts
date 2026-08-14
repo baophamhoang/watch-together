@@ -29,7 +29,23 @@ async function joinRoom(page: Page, name: string, room: string) {
   await expect(page.getByTestId('room-code')).toHaveText(room)
 }
 
-test('two peers share a queue and converge on the same position', async ({browser}) => {
+type DebugSnapshot = {at: number; position: number | null}
+
+/**
+ * Reads window.__watchTogether, the debug instrumentation gated behind
+ * NEXT_PUBLIC_WT_DEBUG (which playwright.config.ts sets for this suite's
+ * webServer). The YouTube iframe is cross-origin, so this is the only way to
+ * read what a given peer is actually playing.
+ */
+const read = (page: Page) =>
+  page.evaluate(() => {
+    const debug = (window as unknown as {__watchTogether?: {readAt(): DebugSnapshot}})
+      .__watchTogether
+    if (!debug) throw new Error('window.__watchTogether is missing — is NEXT_PUBLIC_WT_DEBUG set?')
+    return debug.readAt()
+  })
+
+test('two peers share a queue and converge on the same track', async ({browser}) => {
   const hostContext = await browser.newContext()
   const guestContext = await browser.newContext()
   const host = await hostContext.newPage()
@@ -49,8 +65,10 @@ test('two peers share a queue and converge on the same position', async ({browse
   await expect(guest.getByTestId('queue-item')).toHaveCount(1)
   await expect(guest.getByTestId('now-playing')).not.toHaveText('Nothing playing')
 
-  // Give both players time to start and the drift loop time to settle.
-  await host.waitForTimeout(15_000)
+  // Give both players time to start. Nothing below measures the drift loop,
+  // so this only needs to cover player startup, not settling — see the
+  // dedicated position/drift test below for that.
+  await host.waitForTimeout(5_000)
 
   // Both peers mounted a real player for the same track.
   await expect(host.locator('iframe')).toHaveCount(1)
@@ -71,6 +89,51 @@ test('two peers share a queue and converge on the same position', async ({browse
   await expect(guest.getByTestId('now-playing')).toHaveText(
     await host.getByTestId('now-playing').innerText(),
   )
+
+  await hostContext.close()
+  await guestContext.close()
+})
+
+/**
+ * A regression guard against gross desync (and against the debug hook
+ * disappearing), not the precise 0.5s product target — that is a separate
+ * manual measurement procedure. The bound here is deliberately generous.
+ */
+test('two peers converge on the same playback position', async ({browser}) => {
+  const hostContext = await browser.newContext()
+  const guestContext = await browser.newContext()
+  const host = await hostContext.newPage()
+  const guest = await guestContext.newPage()
+
+  const room = await startRoom(host, 'host')
+  await joinRoom(guest, 'guest', room)
+
+  await expect(host.getByTestId('status')).toContainText('2 watching')
+  await expect(guest.getByTestId('status')).toContainText('2 watching')
+
+  await host.getByTestId('add-url').fill(VIDEO_URL)
+  await host.getByTestId('add-submit').click()
+  await expect(guest.getByTestId('now-playing')).not.toHaveText('Nothing playing')
+  await expect(host.locator('iframe')).toHaveCount(1)
+  await expect(guest.locator('iframe')).toHaveCount(1)
+
+  // Let playback actually start and the guest's 1s drift-correction loop run
+  // several passes before comparing positions.
+  await host.waitForTimeout(10_000)
+
+  const a = await read(host)
+  const b = await read(guest)
+
+  expect(a.position, 'host position').not.toBeNull()
+  expect(b.position, 'guest position').not.toBeNull()
+
+  // Subtracting the wall-clock gap between the two reads, or that gap alone
+  // registers as fake drift. The non-null assertions are safe here: the
+  // expect() calls above already failed the test if either was null.
+  const elapsed = (b.at - a.at) / 1000
+  const drift = b.position! - a.position! - elapsed
+
+  expect(Math.abs(drift)).toBeLessThan(2)
 
   await hostContext.close()
   await guestContext.close()

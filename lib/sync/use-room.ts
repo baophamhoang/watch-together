@@ -1,8 +1,9 @@
 'use client'
 
-import {useEffect, useRef, useState} from 'react'
+import {type RefObject, useEffect, useRef, useState} from 'react'
 import {joinRoom, selfId} from 'trystero'
-import {APP_ID, HOST_CLAIM_MS} from './constants'
+import {bestOffset, makeSample, pushSample, type ClockSample} from './clock'
+import {APP_ID, BEAT_INTERVAL_MS, CLOCK_BURST_SAMPLES, CLOCK_RESAMPLE_MS, HOST_CLAIM_MS} from './constants'
 import {electHost, resolveHostTie} from './election'
 import {expirePending, shouldAcceptState, type PendingIntent} from './pending'
 import {applyIntent, emptyRoomState} from './room-reducer'
@@ -22,13 +23,17 @@ export type RoomApi = {
   warning: string | null
 }
 
-export function useRoom(code: string, name: string): RoomApi {
+export function useRoom(
+  code: string,
+  name: string,
+  positionRef: RefObject<() => number>,
+): RoomApi {
   const [state, setState] = useState<RoomState>(emptyRoomState)
   const [roster, setRoster] = useState<RosterEntry[]>([])
   const [isHost, setIsHost] = useState(false)
   const [status, setStatus] = useState<RoomStatus>('connecting')
-  const [beat] = useState<Beat | null>(null)
-  const [offsetMs] = useState<number | null>(null)
+  const [beat, setBeat] = useState<Beat | null>(null)
+  const [offsetMs, setOffsetMs] = useState<number | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
 
   const isHostRef = useRef(false)
@@ -98,20 +103,44 @@ export function useRoom(code: string, name: string): RoomApi {
       rosterAction.send(entries)
     }
 
-    /**
-     * A presence beat. Task 12 replaces the placeholder fields with a real
-     * snapshot, but the host must announce itself from the very first task or
-     * nobody can tell who the authority is.
-     */
+    const hostIdRef = {current: null as string | null}
+    const samplesRef = {current: [] as ClockSample[]}
+
     const announce = () => {
+      const snapshot = confirmedRef.current
       beatAction.send({
-        version: 0,
-        currentTrackId: null,
-        isPlaying: false,
-        position: 0,
+        version: snapshot.version,
+        currentTrackId: snapshot.currentTrackId,
+        isPlaying: snapshot.isPlaying,
+        position: positionRef.current(),
         hostClock: Date.now(),
       })
     }
+
+    const beatTimer = setInterval(() => {
+      if (isHostRef.current) announce()
+    }, BEAT_INTERVAL_MS)
+
+    const clockAction = room.makeAction('clock', {
+      kind: 'request',
+      onRequest: () => Date.now(),
+    })
+
+    const sampleClock = async () => {
+      const hostId = hostIdRef.current
+      if (!hostId || isHostRef.current) return
+      try {
+        const t0 = Date.now()
+        const hostClock = await clockAction.request(null, {target: hostId, timeoutMs: 3000})
+        const t2 = Date.now()
+        samplesRef.current = pushSample(samplesRef.current, makeSample(t0, Number(hostClock), t2))
+        setOffsetMs(bestOffset(samplesRef.current))
+      } catch {
+        // A dropped sample is harmless; the next one will land.
+      }
+    }
+
+    const clockTimer = setInterval(sampleClock, CLOCK_RESAMPLE_MS)
 
     const promote = () => {
       isHostRef.current = true
@@ -154,14 +183,25 @@ export function useRoom(code: string, name: string): RoomApi {
       if (!isHostRef.current && !sawHostRef.current) promote()
     }, HOST_CLAIM_MS)
 
-    beatAction.onMessage = (_incoming, {peerId}) => {
+    beatAction.onMessage = (incoming, {peerId}) => {
       setStatus('connected')
-      if (!isHostRef.current) {
-        sawHostRef.current = true
+      if (isHostRef.current) {
+        // Two peers claimed the room at once; both sides resolve it identically.
+        if (resolveHostTie(selfId, peerId) === 'demote') demote()
         return
       }
-      // Two peers claimed the room at once; both sides resolve it identically.
-      if (resolveHostTie(selfId, peerId) === 'demote') demote()
+      // A beat proves a host already exists, so the claim timer must not
+      // self-promote. Losing this line makes every guest joining an established
+      // room claim it after HOST_CLAIM_MS, broadcast a roster nobody should
+      // trust, and only then get demoted on hearing the real host.
+      sawHostRef.current = true
+      const isNewHost = hostIdRef.current !== peerId
+      hostIdRef.current = peerId
+      setBeat(incoming)
+      if (isNewHost) {
+        samplesRef.current = []
+        for (let i = 0; i < CLOCK_BURST_SAMPLES; i++) void sampleClock()
+      }
     }
 
     rosterAction.onMessage = entries => {
@@ -244,6 +284,8 @@ export function useRoom(code: string, name: string): RoomApi {
     return () => {
       clearTimeout(claimTimer)
       clearInterval(pendingTimer)
+      clearInterval(beatTimer)
+      clearInterval(clockTimer)
       room.leave()
     }
     // Reconnect only when the room identity changes.

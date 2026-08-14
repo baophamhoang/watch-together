@@ -9,6 +9,7 @@ import {GifPicker} from './GifPicker'
 import {InviteBar} from './InviteBar'
 import {Queue} from './Queue'
 import {RoomTabs} from './RoomTabs'
+import {TapToWatch} from './TapToWatch'
 import {Toasts, type Toast} from './Toasts'
 import {loadNickname} from '@/lib/identity'
 import {diffRoster} from '@/lib/presence'
@@ -44,6 +45,7 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
   })
 
   const [localBlock, setLocalBlock] = useState<Unplayable | null>(null)
+  const [activated, setActivated] = useState(false)
 
   const onEnded = useCallback(() => {
     const trackId = trackIdRef.current
@@ -170,6 +172,21 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
                 ? "This video can't be played here — it may be blocked in your region."
                 : 'This video is unavailable for you.'}
             </PlayerOverlay>
+          )}
+
+          {/* Suppressed alongside the other two overlays rather than stacked on top
+              of them: this renders last, so an un-suppressed gate would sit above
+              the unplayable overlay and swallow its "Skip for everyone" button. */}
+          {!activated && !loadError && !localBlock && (
+            <TapToWatch
+              onActivate={() => {
+                setActivated(true)
+                // Called inside the click handler so it runs under a real user
+                // gesture — that activation is exactly what the autoplay policy
+                // requires, and it does not survive an async hop.
+                handle?.play()
+              }}
+            />
           )}
         </div>
 

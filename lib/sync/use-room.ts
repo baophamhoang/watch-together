@@ -46,6 +46,11 @@ export function useRoom(
       onJoinError: () => setStatus('blocked'),
     })
 
+    /** Trystero's send rejects when a channel closes mid-flight, which is routine
+     *  when a peer drops. Nothing downstream can act on it, so swallow it rather
+     *  than leaving an uncaught rejection in the console. */
+    const fire = (p: Promise<unknown>) => void p.catch(() => {})
+
     // Trystero 0.25 actions are objects: `.send(data, opts)` and an assignable
     // `.onMessage`. The older `const [send, get] = makeAction()` tuple is gone.
     const beatAction = room.makeAction<Beat>('beat')
@@ -73,7 +78,7 @@ export function useRoom(
       const next = applyIntent(confirmedRef.current, intent, Date.now())
       if (next === confirmedRef.current) return
       showConfirmed(next)
-      stateAction.send(next)
+      fire(stateAction.send(next))
     }
 
     stateAction.onMessage = (incoming, {peerId}) => {
@@ -110,7 +115,7 @@ export function useRoom(
       ]
       rosterRef.current = entries
       setRoster(entries)
-      rosterAction.send(entries)
+      fire(rosterAction.send(entries))
     }
 
     const hostIdRef = {current: null as string | null}
@@ -118,13 +123,13 @@ export function useRoom(
 
     const announce = () => {
       const snapshot = confirmedRef.current
-      beatAction.send({
+      fire(beatAction.send({
         version: snapshot.version,
         currentTrackId: snapshot.currentTrackId,
         isPlaying: snapshot.isPlaying,
         position: positionRef.current(),
         hostClock: Date.now(),
-      })
+      }))
     }
 
     const beatTimer = setInterval(() => {
@@ -168,7 +173,7 @@ export function useRoom(
       publishRoster()
       // Seeds already-connected peers (and, after a host hand-off, the room)
       // with this host's replica instead of leaving them on stale state.
-      stateAction.send(confirmedRef.current)
+      fire(stateAction.send(confirmedRef.current))
     }
 
     const demote = () => {
@@ -249,7 +254,7 @@ export function useRoom(
         // Targeted so the joiner gets the queue without waiting for the next
         // change; a broadcast here would also re-send stale state to peers
         // who are already caught up.
-        stateAction.send(confirmedRef.current, {target: peerId})
+        fire(stateAction.send(confirmedRef.current, {target: peerId}))
       }
       setStatus('connected')
     }
@@ -274,7 +279,7 @@ export function useRoom(
         const next = applyIntent(confirmedRef.current, intent, now)
         if (next === confirmedRef.current) return
         showConfirmed(next)
-        stateAction.send(next)
+        fire(stateAction.send(next))
         return
       }
       // Guests render the change immediately; the host's broadcast replaces it.
@@ -291,7 +296,7 @@ export function useRoom(
       displayRef.current = next
       pendingRef.current = [...pendingRef.current, {intent, sentAt: now}]
       setState(displayRef.current)
-      intentAction.send(intent)
+      fire(intentAction.send(intent))
     }
 
     // An intent the host never acknowledged means we lost the authority.

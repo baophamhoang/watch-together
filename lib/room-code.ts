@@ -26,8 +26,13 @@ const CODE_PATTERN = new RegExp(
   `^[a-z]+-[a-z]+-[${SUFFIX_ALPHABET}]{${SUFFIX_LENGTH}}$`,
 )
 
+// Clamped because `random` is an injected parameter: a caller supplying a
+// PRNG that can return exactly 1 (a common rounding bug in hand-rolled
+// generators) would otherwise index past the end and stringify `undefined`
+// into the code, producing a code that fails its own validator.
 function pick<T>(list: readonly T[], random: () => number): T {
-  return list[Math.floor(random() * list.length)]
+  const index = Math.floor(random() * list.length)
+  return list[Math.min(Math.max(index, 0), list.length - 1)]
 }
 
 export function generateRoomCode(random: () => number = Math.random): string {

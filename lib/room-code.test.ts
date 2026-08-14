@@ -19,6 +19,10 @@ describe('generateRoomCode', () => {
     const codes = new Set(Array.from({length: 50}, () => generateRoomCode()))
     expect(codes.size).toBeGreaterThan(45)
   })
+
+  it('still produces a valid code when random() returns its exclusive bound', () => {
+    expect(isValidRoomCode(generateRoomCode(() => 1))).toBe(true)
+  })
 })
 
 describe('isValidRoomCode', () => {

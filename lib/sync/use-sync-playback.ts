@@ -41,9 +41,19 @@ export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
     lastSeekAt.current = Date.now()
   }, [handle, current, state.position])
 
-  // Follow the authoritative play/pause flag.
+  // Follow the authoritative play/pause flag. Unlike the load effect above,
+  // `!current` must NOT bail out here: removing the last queued track sets
+  // `current` to null, and if nothing calls pause() the player keeps playing
+  // the just-removed video forever on every peer. Reset `loadedTrackId` too,
+  // so a later re-add loads cleanly instead of being mistaken for the track
+  // already "loaded".
   useEffect(() => {
-    if (!handle || !current) return
+    if (!handle) return
+    if (!current) {
+      handle.pause()
+      loadedTrackId.current = null
+      return
+    }
     if (state.isPlaying) handle.play()
     else handle.pause()
   }, [handle, current, state.isPlaying])

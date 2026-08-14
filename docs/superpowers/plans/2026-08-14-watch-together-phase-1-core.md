@@ -3471,7 +3471,9 @@ The product claim is "same video, same position." Vitest proves the drift *math*
 
 - [ ] **Step 1: Set up two peers on a long video**
 
-With `npm run dev` running, open two tabs on the same room (reuse Task 14's pair if still open). Queue a video at least ten minutes long, so measurements are not disturbed by the track ending. `https://www.youtube.com/watch?v=5qap5aO4i9A` works; any long video is fine.
+A **production** server and two tabs on one room are normally still running from Task 14 — reuse them. Never use `npm run dev` here: Strict Mode double-invokes effects and races the room cache, and the instrumentation hook this task depends on is only meaningful in the build users actually run. If the server or tabs are gone, rebuild with `npm run build && npm run start` and re-create a room through the UI.
+
+Queue a video **at least ten minutes long**, so a track ending cannot disturb the measurements. Do not trust a hardcoded id from this plan to still exist — pick one, add it, and confirm its real title and duration appear in the queue before measuring. A dead id would otherwise look like a sync failure.
 
 Let playback run for **30 seconds** before measuring, so the clock estimator has its burst plus at least one resample, and the drift loop has had time to act.
 
@@ -3516,7 +3518,7 @@ Write the five drift samples and the pause/seek results to `docs/superpowers/pla
 
 - [ ] **Step 6: Close tabs and commit**
 
-`tabs_close_mcp` on both tabs.
+Navigate both tabs to the app's landing page (`http://localhost:3000/`) rather than closing them — `tabs_close_mcp` correlated with extension tab-group resets that orphaned tabs no tool could reach. Leave the tabs themselves open and report their ids; the controller stops the server.
 
 ```bash
 git add docs/superpowers/plans/results/

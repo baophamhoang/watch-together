@@ -26,7 +26,7 @@ ToolSearch: select:mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome
 
 Call `tabs_context_mcp` first to see existing tabs, then `tabs_create_mcp` for new ones — never reuse a tab id from an earlier session. Do not trigger `alert`/`confirm` dialogs; they block the extension. If a browser step fails 2-3 times, stop and report rather than retrying blindly.
 
-> **Prefer navigating a tab away over closing it.** During Task 10, `tabs_close_mcp` correlated with a tab-group session reset five separate times, each one orphaning tabs that no tool could then reach. To "remove" a peer from a room, navigate that tab to `about:blank` instead — it leaves the room exactly as a close would, without risking the reset. Close tabs only at the very end of a check, and if the group resets anyway, do not fight it: report the orphaned tab ids so a human can close them.
+> **Prefer navigating a tab away over closing it.** During Task 10, `tabs_close_mcp` correlated with a tab-group session reset five separate times, each one orphaning tabs that no tool could then reach. To "remove" a peer from a room, navigate that tab to the app's own landing page (`http://localhost:3000/`) instead — the room component unmounts and the peer leaves exactly as a close would, without risking the reset. Note the `navigate` tool **rejects `about:blank`**, so use the landing page rather than a blank page; it also keeps the request local instead of reaching an external site. Close tabs only at the very end of a check, and if the group resets anyway, do not fight it: report the orphaned tab ids so a human can close them.
 
 > **Drive a production build, not `npm run dev`.** Use `npm run build && npm run start` for every browser verification. React Strict Mode double-invokes effects in development — mount, unmount, mount — and Trystero caches rooms by app id and room id while `leave()` tears down asynchronously. The phantom mount's teardown therefore races the surviving mount's `joinRoom()`, and the two can share a room mid-teardown. In dev this shows up intermittently as both tabs believing they are host, which is a ghost, not a defect in the code under test. A production build does not double-mount and is what users actually run. Discovered during Task 10.
 
@@ -2811,7 +2811,7 @@ export default function LandingPage() {
 
 - [ ] **Step 6: Set the dark base**
 
-In `app/globals.css`, after the existing `@import "tailwindcss";` line, add:
+In `app/globals.css`, append this at the **end of the file**. Placement matters: the scaffold already defines a `body` rule further down, so adding this near the top lets that later rule override it — and because the dark palette only differs under a light-mode preference, the bug is invisible to anyone testing on a dark-mode machine. Keep every pre-existing line, including `font-family`.
 
 ```css
 body {

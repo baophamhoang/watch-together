@@ -1682,6 +1682,11 @@ export async function probeDuration(
       videoId,
       events: {
         onReady: event => {
+          // The backstop may already have fired and destroyed the player while
+          // this callback sat queued. That window is the whole timeout — far
+          // wider than the retry's below — and reading from a destroyed player
+          // throws, with nothing to catch it inside an event callback.
+          if (settled) return
           const first = read(event.target)
           if (first !== null) return finish(first)
           setTimeout(() => {

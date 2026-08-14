@@ -23,6 +23,10 @@ describe('generateRoomCode', () => {
   it('still produces a valid code when random() returns its exclusive bound', () => {
     expect(isValidRoomCode(generateRoomCode(() => 1))).toBe(true)
   })
+
+  it('still produces a valid code when random() returns NaN', () => {
+    expect(isValidRoomCode(generateRoomCode(() => NaN))).toBe(true)
+  })
 })
 
 describe('isValidRoomCode', () => {

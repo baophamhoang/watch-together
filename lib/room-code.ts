@@ -21,6 +21,9 @@ const NOUNS = [
 ] as const
 
 const SUFFIX_ALPHABET = '23456789abcdefghjkmnpqrstuvwxyz'
+// Hoisted so the four suffix draws in generateRoomCode share one array
+// instead of each re-splitting the alphabet string from scratch.
+const SUFFIX_CHARS = SUFFIX_ALPHABET.split('')
 const SUFFIX_LENGTH = 4
 const CODE_PATTERN = new RegExp(
   `^[a-z]+-[a-z]+-[${SUFFIX_ALPHABET}]{${SUFFIX_LENGTH}}$`,
@@ -29,15 +32,18 @@ const CODE_PATTERN = new RegExp(
 // Clamped because `random` is an injected parameter: a caller supplying a
 // PRNG that can return exactly 1 (a common rounding bug in hand-rolled
 // generators) would otherwise index past the end and stringify `undefined`
-// into the code, producing a code that fails its own validator.
+// into the code, producing a code that fails its own validator. The clamp
+// alone isn't enough for a degenerate PRNG that returns NaN: Math.max/min
+// propagate NaN rather than bounding it, so `index` must be checked directly.
 function pick<T>(list: readonly T[], random: () => number): T {
   const index = Math.floor(random() * list.length)
-  return list[Math.min(Math.max(index, 0), list.length - 1)]
+  const clamped = Math.min(Math.max(index, 0), list.length - 1)
+  return list[Number.isFinite(index) ? clamped : 0]
 }
 
 export function generateRoomCode(random: () => number = Math.random): string {
   const suffix = Array.from({length: SUFFIX_LENGTH}, () =>
-    pick(SUFFIX_ALPHABET.split(''), random),
+    pick(SUFFIX_CHARS, random),
   ).join('')
   return `${pick(ADJECTIVES, random)}-${pick(NOUNS, random)}-${suffix}`
 }

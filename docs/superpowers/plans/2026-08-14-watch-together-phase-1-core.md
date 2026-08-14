@@ -26,6 +26,8 @@ ToolSearch: select:mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome
 
 Call `tabs_context_mcp` first to see existing tabs, then `tabs_create_mcp` for new ones — never reuse a tab id from an earlier session. Close the tabs you opened when the check finishes. Do not trigger `alert`/`confirm` dialogs; they block the extension. If a browser step fails 2-3 times, stop and report rather than retrying blindly.
 
+> **Console capture starts late — reload before trusting it.** `read_console_messages` only records from the moment it is *first called on that tab*. Navigate, then call it once (with any pattern) purely to begin tracking, then reload the page and do the actual work. Skip that and every error thrown during page load is invisible, and the check reports a clean console that was never observed — a false pass, which is worse than no check. Verified against the live extension on 2026-08-14.
+
 ## Global Constraints
 
 - Next.js `16.3.1`, React `19.2.8`, Tailwind `4` — already installed, do not upgrade.

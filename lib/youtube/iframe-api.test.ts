@@ -1,0 +1,44 @@
+// @vitest-environment jsdom
+import {afterEach, describe, expect, it} from 'vitest'
+import {loadIframeApi, resetIframeApiLoaderForTests} from './iframe-api'
+
+afterEach(() => {
+  resetIframeApiLoaderForTests()
+  document.head.innerHTML = ''
+  delete (window as {YT?: unknown}).YT
+  delete (window as {onYouTubeIframeAPIReady?: unknown}).onYouTubeIframeAPIReady
+})
+
+describe('loadIframeApi', () => {
+  it('resolves immediately when the API is already present', async () => {
+    const stub = {Player: function () {}}
+    ;(window as {YT?: unknown}).YT = stub
+    await expect(loadIframeApi()).resolves.toBe(stub)
+  })
+
+  it('injects the script tag exactly once across concurrent calls', () => {
+    loadIframeApi()
+    loadIframeApi()
+    expect(document.querySelectorAll('script[src*="iframe_api"]')).toHaveLength(1)
+  })
+
+  it('returns the same promise on repeated calls', () => {
+    expect(loadIframeApi()).toBe(loadIframeApi())
+  })
+
+  it('resolves when YouTube invokes the global ready callback', async () => {
+    const promise = loadIframeApi()
+    const stub = {Player: function () {}}
+    ;(window as {YT?: unknown}).YT = stub
+    window.onYouTubeIframeAPIReady?.()
+    await expect(promise).resolves.toBe(stub)
+  })
+
+  it('allows a retry after the script fails to load', async () => {
+    const promise = loadIframeApi()
+    const script = document.querySelector('script[src*="iframe_api"]') as HTMLScriptElement
+    script.onerror?.(new Event('error'))
+    await expect(promise).rejects.toThrow(/Failed to load/)
+    expect(loadIframeApi()).not.toBe(promise)
+  })
+})

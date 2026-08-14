@@ -2,6 +2,7 @@
 
 import {useState} from 'react'
 import type {Track} from '@/lib/sync/types'
+import type {VideoMeta} from '@/lib/youtube/oembed'
 import {InvalidYouTubeUrlError, parseYouTubeUrl} from '@/lib/youtube/parse-url'
 import {probeDuration} from '@/lib/youtube/probe-duration'
 
@@ -32,7 +33,7 @@ export function AddTrackForm({
         )
         return
       }
-      const meta = await response.json()
+      const meta: VideoMeta = await response.json()
 
       // A missing duration is cosmetic and must never block adding.
       const durationSec = await probeDuration(videoId)

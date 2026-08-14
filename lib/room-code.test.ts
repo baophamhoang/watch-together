@@ -41,4 +41,12 @@ describe('isValidRoomCode', () => {
   ])('rejects %s', code => {
     expect(isValidRoomCode(code)).toBe(false)
   })
+
+  it('rejects the join field placeholder text', () => {
+    // The placeholder must have the same shape as a real code (so it reads as
+    // an example) while failing validation itself — otherwise submitting the
+    // field unchanged silently joins a real, shared room. Keep this in sync
+    // with the placeholder in app/page.tsx.
+    expect(isValidRoomCode('word-word-abcd')).toBe(false)
+  })
 })

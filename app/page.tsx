@@ -67,7 +67,7 @@ export default function LandingPage() {
               setError(null)
             }}
             onKeyDown={event => event.key === 'Enter' && join()}
-            placeholder="ember-otter-k7qm"
+            placeholder="word-word-abcd"
             className="flex-1 rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 outline-none focus:border-neutral-500"
           />
           <button

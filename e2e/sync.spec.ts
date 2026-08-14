@@ -24,7 +24,7 @@ async function startRoom(page: Page, name: string): Promise<string> {
 async function joinRoom(page: Page, name: string, room: string) {
   await page.goto('/')
   await page.getByLabel('Your name').fill(name)
-  await page.getByPlaceholder('ember-otter-k7qm').fill(room)
+  await page.getByPlaceholder('word-word-abcd').fill(room)
   await page.getByRole('button', {name: 'Join'}).click()
   await expect(page.getByTestId('room-code')).toHaveText(room)
 }

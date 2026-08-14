@@ -3,10 +3,13 @@
 import {useCallback, useEffect, useRef, useState} from 'react'
 import {SkipForward} from 'lucide-react'
 import {AddTrackForm} from './AddTrackForm'
+import {PresenceBar} from './PresenceBar'
 import {Queue} from './Queue'
 import {RoomTabs} from './RoomTabs'
+import {Toasts, type Toast} from './Toasts'
 import {loadNickname} from '@/lib/identity'
-import type {Track, Unplayable} from '@/lib/sync/types'
+import {diffRoster} from '@/lib/presence'
+import type {RosterEntry, Track, Unplayable} from '@/lib/sync/types'
 import {useRoom} from '@/lib/sync/use-room'
 import {useSyncPlayback} from '@/lib/sync/use-sync-playback'
 import {useYouTubePlayer} from '@/lib/youtube/use-player'
@@ -105,6 +108,25 @@ export function Room({code}: {code: string}) {
     }
   }, [handle, room, current])
 
+  const [toasts, setToasts] = useState<Toast[]>([])
+  const previousRoster = useRef<RosterEntry[]>([])
+
+  useEffect(() => {
+    const {joined, left} = diffRoster(previousRoster.current, room.roster)
+    previousRoster.current = room.roster
+    if (joined.length === 0 && left.length === 0) return
+    const next = [
+      ...joined.map(p => ({id: `j-${p.peerId}-${Date.now()}`, message: `${p.name} joined`})),
+      ...left.map(p => ({id: `l-${p.peerId}-${Date.now()}`, message: `${p.name} left`})),
+    ]
+    setToasts(current => [...current, ...next])
+  }, [room.roster])
+
+  const dismissToast = useCallback(
+    (id: string) => setToasts(current => current.filter(t => t.id !== id)),
+    [],
+  )
+
   const add = (track: Track) => room.send({type: 'enqueue', track})
 
   return (
@@ -156,13 +178,13 @@ export function Room({code}: {code: string}) {
       </section>
 
       <aside className="flex min-h-0 w-full flex-col border-border lg:w-[380px] lg:shrink-0 lg:border-l">
-        {/* Room code + presence status: not part of this task's brief, but the
-            current build has them and they're load-bearing for the e2e suite
-            (startRoom() waits on data-testid="room-code" before anything else
-            runs). Kept per the dispatch's "keep it and say so" instruction —
-            re-skinned onto Task 1 tokens since the raw Tailwind colours they
-            used are gone. Presence/invite are real tasks later in this plan;
-            this is only carrying forward what already existed. */}
+        {/* Room code + presence status: the code and status text predate this
+            task and are load-bearing for the e2e suite (startRoom() waits on
+            data-testid="room-code" before anything else runs) — both test ids
+            and the "N watching" status string must survive any future change
+            here. The avatar stack between them is this task's addition.
+            Invite is still a real task later in this plan: Task 4 replaces
+            this whole row with a designed invite bar. */}
         <div className="flex shrink-0 items-center justify-between gap-[var(--space-2)] border-b border-border px-[var(--space-3)] py-[var(--space-2)] text-sm">
           <code
             className="rounded-[var(--radius-sm)] bg-surface-raised px-[var(--space-2)] py-[var(--space-1)] text-text"
@@ -170,6 +192,7 @@ export function Room({code}: {code: string}) {
           >
             {code}
           </code>
+          <PresenceBar roster={room.roster} selfId={room.selfId} />
           <span className="text-muted" data-testid="status">
             {room.status === 'connected'
               ? `${room.roster.length} watching${room.isHost ? ' · host' : ''}`
@@ -203,6 +226,8 @@ export function Room({code}: {code: string}) {
           }
         />
       </aside>
+
+      <Toasts items={toasts} onDismiss={dismissToast} />
     </main>
   )
 }

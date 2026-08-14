@@ -6,9 +6,25 @@
 
 **Architecture:** Peers connect directly over WebRTC via Trystero (Nostr signaling); no realtime backend. One peer is the host and owns canonical room state — guests send intents and apply them optimistically, then reconcile against the host's versioned broadcasts. The host emits a heartbeat every 2s; guests estimate their clock offset from it NTP-style and correct drift with a lead-compensated seek. Next.js route handlers exist only to proxy keyless YouTube metadata.
 
-**Tech Stack:** Next.js 16.3.1 (App Router), React 19.2, TypeScript, Tailwind 4, Trystero 0.25.x, Vitest, Playwright.
+**Tech Stack:** Next.js 16.3.1 (App Router), React 19.2, TypeScript, Tailwind 4, Trystero 0.25.x, Vitest, Playwright, Chrome MCP.
 
 **Spec:** `docs/superpowers/specs/2026-08-14-watch-together-design.md`
+
+## Verification layers
+
+Three layers, each covering what the one below cannot:
+
+1. **Vitest** — every pure module. Fast, deterministic, no network.
+2. **Playwright** — peers connect, queue replicates, skip propagates. Cannot read playback position: the YouTube iframe is cross-origin.
+3. **Chrome MCP** — drives two real tabs and reads each peer's *actual* playback position through a dev-only instrumentation hook, which is the only way to prove the core claim that both are at the same point in the video.
+
+Tasks with a **Chrome MCP verification** step are not complete until it passes. Before calling any `mcp__claude-in-chrome__*` tool, load the schemas in ONE ToolSearch call:
+
+```
+ToolSearch: select:mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__tabs_create_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__computer,mcp__claude-in-chrome__read_page,mcp__claude-in-chrome__javascript_tool,mcp__claude-in-chrome__read_console_messages,mcp__claude-in-chrome__form_input,mcp__claude-in-chrome__tabs_close_mcp
+```
+
+Call `tabs_context_mcp` first to see existing tabs, then `tabs_create_mcp` for new ones — never reuse a tab id from an earlier session. Close the tabs you opened when the check finishes. Do not trigger `alert`/`confirm` dialogs; they block the extension. If a browser step fails 2-3 times, stop and report rather than retrying blindly.
 
 ## Global Constraints
 
@@ -1573,9 +1589,9 @@ export async function probeDuration(
 }
 ```
 
-- [ ] **Step 2: Verify manually once the room UI exists**
+- [ ] **Step 2: Note the deferred verification**
 
-This step is a note for Task 14, not runnable yet: after adding a track, its queue row should show a real duration (for example `3:33` for `dQw4w9WgXcQ`) within a few seconds, and adding a track must still succeed when the probe returns null.
+There is nothing to run yet — the probe has no caller until Task 14. Its verification is Task 14 Step 9 item 2, which asserts a real duration (`3:33` for `dQw4w9WgXcQ`) rather than `—`. Adding a track must still succeed when the probe returns null, since duration is cosmetic.
 
 - [ ] **Step 3: Commit**
 
@@ -1674,6 +1690,11 @@ export function useRoom(code: string, name: string): RoomApi {
 
     const nameRef = new Map<string, string>()
 
+    // React state is stale inside these long-lived closures, so anything a
+    // callback reads must live in a ref.
+    const rosterRef = {current: [] as RosterEntry[]}
+    const sawHostRef = {current: false}
+
     const publishRoster = () => {
       const entries: RosterEntry[] = [
         {peerId: selfId, name, joinOrder: 0},
@@ -1683,8 +1704,24 @@ export function useRoom(code: string, name: string): RoomApi {
           joinOrder,
         })),
       ]
+      rosterRef.current = entries
       setRoster(entries)
       rosterAction.send(entries)
+    }
+
+    /**
+     * A presence beat. Task 12 replaces the placeholder fields with a real
+     * snapshot, but the host must announce itself from the very first task or
+     * nobody can tell who the authority is.
+     */
+    const announce = () => {
+      beatAction.send({
+        version: 0,
+        currentTrackId: null,
+        isPlaying: false,
+        position: 0,
+        hostClock: Date.now(),
+      })
     }
 
     const promote = () => {
@@ -1692,6 +1729,7 @@ export function useRoom(code: string, name: string): RoomApi {
       setIsHost(true)
       setStatus('connected')
       publishRoster()
+      announce()
     }
 
     const demote = () => {
@@ -1701,20 +1739,25 @@ export function useRoom(code: string, name: string): RoomApi {
       setState(emptyRoomState())
     }
 
-    // Claim the room only if no existing host announces itself first.
+    // Claim the room only if no existing host announced itself first.
     const claimTimer = setTimeout(() => {
-      if (!isHostRef.current && roster.length === 0) promote()
+      if (!isHostRef.current && !sawHostRef.current) promote()
     }, HOST_CLAIM_MS)
 
     beatAction.onMessage = (_incoming, {peerId}) => {
       setStatus('connected')
-      if (!isHostRef.current) return
+      if (!isHostRef.current) {
+        sawHostRef.current = true
+        return
+      }
       // Two peers claimed the room at once; both sides resolve it identically.
       if (resolveHostTie(selfId, peerId) === 'demote') demote()
     }
 
     rosterAction.onMessage = entries => {
-      if (!isHostRef.current) setRoster(entries)
+      if (isHostRef.current) return
+      rosterRef.current = entries
+      setRoster(entries)
     }
 
     room.onPeerJoin = peerId => {
@@ -1722,6 +1765,8 @@ export function useRoom(code: string, name: string): RoomApi {
       if (isHostRef.current) {
         joinOrderRef.current.set(peerId, nextJoinOrderRef.current++)
         publishRoster()
+        // Tell the newcomer who the host is without waiting for the next beat.
+        announce()
       }
       setStatus('connected')
     }
@@ -1733,8 +1778,10 @@ export function useRoom(code: string, name: string): RoomApi {
         publishRoster()
         return
       }
-      // Host vanished: phase 3 migrates, phase 1 just surfaces it.
-      const survivors = roster.filter(entry => entry.peerId !== peerId)
+      // Host vanished: phase 3 migrates properly, phase 1 just promotes the
+      // deterministic successor so the room does not silently freeze.
+      sawHostRef.current = false
+      const survivors = rosterRef.current.filter(entry => entry.peerId !== peerId)
       if (electHost(survivors) === selfId) promote()
     }
 
@@ -1763,11 +1810,48 @@ export function useRoom(code: string, name: string): RoomApi {
 
 > **Note for the implementer:** `sendRef` is inert here and `beat`/`offsetMs` are always null; Tasks 11 and 12 wire them up. Leaving them stubbed keeps this task independently reviewable — the room connects and elects a host, but does not yet share state. `beatAction` is created here because host determination listens on it, even though nothing sends a beat until Task 12.
 
-- [ ] **Step 4: Verify manually**
+- [ ] **Step 4: Chrome MCP verification — two peers, exactly one host**
 
-Run: `npm run dev`, then temporarily render `useRoom('ember-otter-k7qm', 'bao')` output from `app/page.tsx` (`JSON.stringify({isHost, status, roster})`).
+Temporarily replace the body of `app/page.tsx` with a probe that exposes the hook's output to the page:
 
-Open the page in two tabs. Expected: within ~2 seconds both show `status: "connected"`, exactly one shows `isHost: true`, and the roster lists two entries. Revert the temporary render before committing.
+```tsx
+'use client'
+
+import {useRef} from 'react'
+import {useRoom} from '@/lib/sync/use-room'
+
+export default function Probe() {
+  const positionRef = useRef<() => number>(() => 0)
+  const room = useRoom('ember-otter-k7qm', 'probe', positionRef)
+  return (
+    <pre data-testid="probe">
+      {JSON.stringify({status: room.status, isHost: room.isHost, peers: room.roster.length})}
+    </pre>
+  )
+}
+```
+
+Start the server: `npm run dev`
+
+Then, with the Chrome MCP tools loaded (see "Verification layers"):
+
+1. `tabs_context_mcp` to see the current tabs.
+2. `tabs_create_mcp` twice, both to `http://localhost:3000`.
+3. Wait about 5 seconds for relay discovery, then in **each** tab run `javascript_tool` with:
+
+```js
+console.log('[probe]', document.querySelector('[data-testid=probe]').textContent)
+```
+
+4. `read_console_messages` with pattern `\[probe\]` on each tab.
+
+Expected: both tabs report `"status":"connected"` and `"peers":1`, and **exactly one** reports `"isHost":true`.
+
+If both claim host, the presence `announce()` is not reaching the other peer, or `resolveHostTie` is not demoting the loser — do not proceed to Task 11 until exactly one host survives, because every later task assumes a single writer.
+
+4. Also run `read_console_messages` with pattern `error|failed` and confirm no relay or WebRTC errors.
+5. Close the second tab with `tabs_close_mcp` and re-read the probe in the first: it should report `"peers":0` and still exactly one host.
+6. `tabs_close_mcp` on the remaining tab, then revert `app/page.tsx`.
 
 - [ ] **Step 5: Commit**
 
@@ -2002,11 +2086,54 @@ stateAction.send(confirmedRef.current, {target: peerId})
 
 > **Deviation from the spec:** the spec describes a `hello` request/response that a joiner sends to pull state. Pushing state to the joiner instead achieves the same result with one message and no timeout to tune, so `hello` is not implemented. The spec's message table is accurate about intent, not about direction.
 
-- [ ] **Step 6: Verify manually**
+- [ ] **Step 6: Chrome MCP verification — state replicates both ways**
 
-Run `npm run dev` and open two tabs on the same temporary `useRoom` render from Task 10, with a button wired to `send({type: 'enqueue', track: ...})` using any hand-built track object.
+Restore the Task 10 probe page, extended to expose `send` and the queue:
 
-Expected: enqueueing in either tab updates both tabs' `state.queue`, and `state.version` increases in both. Revert the temporary UI before committing.
+```tsx
+'use client'
+
+import {useRef} from 'react'
+import {useRoom} from '@/lib/sync/use-room'
+
+export default function Probe() {
+  const positionRef = useRef<() => number>(() => 0)
+  const room = useRoom('ember-otter-k7qm', 'probe', positionRef)
+
+  if (typeof window !== 'undefined') {
+    ;(window as unknown as {__probe?: unknown}).__probe = room
+  }
+
+  return (
+    <pre data-testid="probe">
+      {JSON.stringify({
+        isHost: room.isHost,
+        version: room.state.version,
+        queue: room.state.queue.map(t => t.id),
+      })}
+    </pre>
+  )
+}
+```
+
+Run `npm run dev`, open two tabs via `tabs_create_mcp`, wait ~5s, then in the **guest** tab (the one reporting `isHost:false`) run `javascript_tool`:
+
+```js
+window.__probe.send({
+  type: 'enqueue',
+  track: {
+    id: 'probe-1', videoId: 'dQw4w9WgXcQ', title: 'probe', author: 'a',
+    thumbnail: '', durationSec: 10, startAtSec: 0,
+    addedBy: {peerId: 'x', name: 'probe'}, addedAt: Date.now(),
+  },
+})
+```
+
+Then log the probe text in both tabs and read it back with `read_console_messages`.
+
+Expected: **both** tabs list `"probe-1"` in the queue, and both report the same `version`. A guest-originated change reaching the host and coming back is the whole point of this task — if only the guest shows it, intents are not reaching the host; if the guest shows it and then loses it after ~2 seconds, the host is not acknowledging and the pending-expiry warning fired.
+
+Close both tabs and revert `app/page.tsx`.
 
 - [ ] **Step 7: Commit**
 
@@ -2059,16 +2186,14 @@ import {BEAT_INTERVAL_MS, CLOCK_BURST_SAMPLES, CLOCK_RESAMPLE_MS} from './consta
 import {bestOffset, makeSample, pushSample, type ClockSample} from './clock'
 ```
 
-Inside the `useEffect`, after the actions are created, add the heartbeat. The host reads position from the live player, not from stored state, because the player is the ground truth for what is actually on screen:
+Replace the placeholder `announce()` from Task 10 with one that sends a real snapshot. The host reads position from the live player rather than from stored state, because the player is the ground truth for what is actually on screen:
 
 ```ts
 const hostIdRef = {current: null as string | null}
 const samplesRef = {current: [] as ClockSample[]}
 
-const beatTimer = setInterval(() => {
-  if (!isHostRef.current) return
+const announce = () => {
   const snapshot = confirmedRef.current
-  if (snapshot.currentTrackId === null) return
   beatAction.send({
     version: snapshot.version,
     currentTrackId: snapshot.currentTrackId,
@@ -2076,8 +2201,14 @@ const beatTimer = setInterval(() => {
     position: positionRef.current(),
     hostClock: Date.now(),
   })
+}
+
+const beatTimer = setInterval(() => {
+  if (isHostRef.current) announce()
 }, BEAT_INTERVAL_MS)
 ```
+
+> **Beat on an empty queue.** Send the beat even when `currentTrackId` is null. Guests use beats to discover who the host is and to sample its clock, and every room starts empty — gating beats on having a track would leave a fresh room with no discoverable authority. `useSyncPlayback` already ignores beats whose track does not match what is loaded, so an empty-room beat is harmless.
 
 - [ ] **Step 3: Add clock sampling**
 
@@ -2461,10 +2592,17 @@ body {
 }
 ```
 
-- [ ] **Step 7: Verify manually**
+- [ ] **Step 7: Chrome MCP verification — landing page**
 
-Run: `npm run dev` and open `http://localhost:3000`.
-Expected: entering a name and clicking "Start a room" navigates to `/r/<generated-code>` (a 404 for now — Task 14 adds the route). Typing a malformed code and clicking Join shows the error without navigating. Reloading the page restores the saved name.
+Run `npm run dev`, then `tabs_create_mcp` to `http://localhost:3000`.
+
+1. `read_page` to confirm the name field, "Start a room", the code input, and "Join" all render.
+2. `form_input` the name field with `bao`, then `computer` click "Start a room".
+3. Expected: the URL becomes `/r/<adjective>-<noun>-<4 chars>`. A 404 body is correct at this task — Task 14 adds the route.
+4. `navigate` back to `/`, then `read_page`. Expected: the name field shows `bao`, restored from storage.
+5. `form_input` the code field with `not-a-real-code` and click "Join". Expected: the error text appears and the URL does **not** change.
+6. `read_console_messages` with pattern `error` — expect nothing beyond the 404.
+7. `tabs_close_mcp`.
 
 - [ ] **Step 8: Commit**
 
@@ -2779,6 +2917,24 @@ export function Room({code}: {code: string}) {
 
   const {resyncing, current} = useSyncPlayback(room, handle)
 
+  // Dev-only probe. The YouTube iframe is cross-origin, so this is the only way
+  // an automated check can read what each peer is actually playing.
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'production') return
+    ;(window as unknown as {__watchTogether?: unknown}).__watchTogether = {
+      readAt: () => ({
+        at: Date.now(),
+        position: handle?.getCurrentTime() ?? null,
+        trackId: room.state.currentTrackId,
+        title: current?.title ?? null,
+        isPlaying: room.state.isPlaying,
+        isHost: room.isHost,
+        peers: room.roster.length,
+        offsetMs: room.offsetMs,
+      }),
+    }
+  }, [handle, room, current])
+
   const add = (track: Track) => room.send({type: 'enqueue', track})
 
   return (
@@ -2850,17 +3006,22 @@ export function Room({code}: {code: string}) {
 }
 ```
 
-- [ ] **Step 9: Verify manually — the whole product**
+- [ ] **Step 9: Chrome MCP verification — the whole product**
 
-Run: `npm run dev`, open `http://localhost:3000`, start a room, and copy the URL into a second browser window.
+Run `npm run dev`. Open tab A via `tabs_create_mcp` to `http://localhost:3000`, click "Start a room", and read the resulting `/r/<code>` URL. Open tab B with `tabs_create_mcp` to that same URL.
 
-Expected:
-1. Both windows show `2 watching`, one marked `host`.
-2. Pasting `https://youtu.be/dQw4w9WgXcQ` in either window adds it to **both** queues, with title, author, and a real duration.
-3. The video plays in both windows at the same position.
-4. Pausing in one pauses the other within about a second.
-5. Seeking in one drags the other to the same spot.
-6. Skip advances both.
+Walk through, using `computer` to click and `form_input` to type, and `read_page` to check results:
+
+1. Both tabs show `2 watching`, exactly one marked `host`.
+2. Paste `https://youtu.be/dQw4w9WgXcQ` into tab A's add field and submit. Both tabs show the track with its title, author, and a real duration (`3:33`), not `—`. A `—` means the duration probe failed — check the console before moving on.
+3. Both tabs render an `iframe` and show the title under the player.
+4. Add `https://www.youtube.com/watch?v=9bZkp7q19f0` from **tab B**. Both queues show two items.
+5. Click Skip in tab B. Both tabs move to the same new title.
+6. Remove a track in tab A. It disappears from both.
+7. Paste `https://vimeo.com/12345` into tab A. The "not a YouTube link" error shows and the queue is unchanged.
+8. `read_console_messages` with pattern `error|warn` on both tabs. Expect no React key warnings, no unhandled rejections, no repeated WebRTC failures.
+
+Leave both tabs open — Task 16 measures sync on this same pair.
 
 - [ ] **Step 10: Commit**
 
@@ -3024,8 +3185,82 @@ git commit -m "test: two-browser end-to-end sync coverage"
 
 ---
 
+### Task 16: Chrome MCP sync measurement
+
+The product claim is "same video, same position." Vitest proves the drift *math*; Playwright proves peers connect. Neither proves two real browsers actually land on the same second. This task does, and it is the acceptance gate for phase 1.
+
+**Files:**
+- Create: `docs/superpowers/plans/results/2026-08-14-sync-measurement.md`
+
+**Interfaces:**
+- Consumes: `window.__watchTogether.readAt()` from Task 14
+- Produces: a recorded measurement, committed as evidence
+
+- [ ] **Step 1: Set up two peers on a long video**
+
+With `npm run dev` running, open two tabs on the same room (reuse Task 14's pair if still open). Queue a video at least ten minutes long, so measurements are not disturbed by the track ending. `https://www.youtube.com/watch?v=5qap5aO4i9A` works; any long video is fine.
+
+Let playback run for **30 seconds** before measuring, so the clock estimator has its burst plus at least one resample, and the drift loop has had time to act.
+
+- [ ] **Step 2: Measure drift**
+
+Reading two tabs takes two separate calls, so the wall-clock gap between them must be subtracted or it shows up as fake drift. Run `javascript_tool` in tab A, then immediately in tab B:
+
+```js
+console.log('[sync]', JSON.stringify(window.__watchTogether.readAt()))
+```
+
+Collect both with `read_console_messages` using pattern `\[sync\]`, then compute:
+
+```
+elapsed = (B.at - A.at) / 1000
+drift   = (B.position - A.position) - elapsed
+```
+
+Repeat **five times**, roughly five seconds apart.
+
+- [ ] **Step 3: Judge the result**
+
+Expected: `|drift| < 0.5s` on at least four of five samples, and never above 1.5s.
+
+If drift is consistently large and **positive or negative in a stable direction**, the clock offset is wrong — check that `offsetMs` is non-null in the guest's reading and that `bestOffset` is picking the low-RTT sample.
+
+If drift oscillates between large positive and negative values, anti-thrash is not working — verify `lastCorrectionAt` and `lastSeekAt` are actually being set after each seek.
+
+If `offsetMs` is `null` on the guest, no beat is reaching it; confirm the host's beat timer is running and not gated on a non-null track.
+
+- [ ] **Step 4: Verify pause and seek propagate**
+
+1. `computer` click the player in tab A to pause. Wait 2 seconds, then `readAt()` in both: `isPlaying` false in both, and positions within 0.5s.
+2. Click again to resume. Both report `isPlaying` true.
+3. In tab B, use the YouTube progress bar to seek roughly halfway. Within ~3 seconds both `readAt()` positions should agree within 1.5s.
+
+> Seeking via the YouTube control is a genuine user path and exercises `onUserPause`/`onUserPlay` suppression. If tab B's seek bounces back, the suppression window in `use-player.ts` is too short and the correction loop is fighting the user.
+
+- [ ] **Step 5: Record the evidence**
+
+Write the five drift samples and the pause/seek results to `docs/superpowers/plans/results/2026-08-14-sync-measurement.md`, including the video used, the observed `offsetMs` on the guest, and anything that needed a retry. State plainly if a criterion was not met rather than rounding in the app's favor.
+
+- [ ] **Step 6: Close tabs and commit**
+
+`tabs_close_mcp` on both tabs.
+
+```bash
+git add docs/superpowers/plans/results/
+git commit -m "test: recorded two-browser sync measurement for phase 1"
+```
+
+---
+
 ## Phase 1 done
 
 At this point: two people open one link, share a queue, and watch in sync. Phases 2 (chat, presence, GIFs) and 3 (mobile gate, host migration, TURN) get their own plans.
 
-Run `npm test` and `npm run test:e2e` before considering the phase complete.
+Before considering the phase complete, all three layers must pass:
+
+```bash
+npm test          # every pure module
+npm run test:e2e  # peers connect, queue replicates, skip propagates
+```
+
+plus Task 16's recorded Chrome MCP measurement showing drift under 0.5s. A green `npm test` alone does not mean the app works — the pure logic can be perfect while the peers never find each other.

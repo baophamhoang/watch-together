@@ -90,7 +90,10 @@ export function useRoom(code: string, name: string): RoomApi {
     const demote = () => {
       isHostRef.current = false
       setIsHost(false)
-      joinOrderRef.current.clear()
+      // `joinOrderRef` is deliberately NOT cleared here: it records who is
+      // connected, which is independent of whether we happen to be host. Clearing
+      // it would leave a later promotion — when the host departs — publishing a
+      // roster that omits every peer already in the room.
       setState(emptyRoomState())
     }
 
@@ -117,10 +120,17 @@ export function useRoom(code: string, name: string): RoomApi {
 
     room.onPeerJoin = peerId => {
       nameRef.set(peerId, 'friend')
+      // Recorded for EVERY peer, not only while we are host. `onPeerJoin` fires
+      // once per peer and never again, so when two tabs connect before either has
+      // claimed the room — the ordinary case when a link is shared — a host-gated
+      // version misses the other peer permanently. Both would then publish a
+      // roster containing only themselves, and a later successor election would
+      // find no survivors and leave the room hostless and frozen.
+      joinOrderRef.current.set(peerId, nextJoinOrderRef.current++)
       if (isHostRef.current) {
-        joinOrderRef.current.set(peerId, nextJoinOrderRef.current++)
         publishRoster()
-        // Tell the newcomer who the host is without waiting for the next beat.
+        // Re-announce so the newcomer learns who the host is without waiting for
+        // the next beat. This broadcasts; it is not a targeted send.
         announce()
       }
       setStatus('connected')

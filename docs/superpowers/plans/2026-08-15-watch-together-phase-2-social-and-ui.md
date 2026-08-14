@@ -1541,10 +1541,45 @@ The last surfaces still wearing the placeholder styling. This is also the access
 - Modify: `components/AddTrackForm.tsx`
 - Modify: `app/page.tsx`
 - Modify: `app/layout.tsx`
+- Modify: `components/Room.tsx` (mobile layout fix, Step 0)
+- Modify: `components/PresenceBar.tsx`, `components/Toasts.tsx`, `components/GifPicker.tsx` (routed fixes, Step 6)
 
 **Interfaces:**
 - Consumes: tokens from Task 1
 - Produces: nothing new
+
+- [ ] **Step 0: Fix the mobile layout void**
+
+Found during Task 7's phone verification. On a phone the rail is crushed and a
+band of dead black sits above it, which is the opposite of the intended
+priority: the video and the bar need only their natural height, and every
+remaining pixel belongs to chat and the queue.
+
+`<main>` is `flex-col` below `lg`. The `<section>` holding the player carries
+`flex-1`, so it claims all the free space even though both its children are
+`shrink-0` and total roughly 270px; the `<aside>` has no `flex-1` and its
+`min-h-0` lets it shrink under its own content. Swap which one grows, per
+breakpoint.
+
+In `components/Room.tsx`, the section becomes:
+
+```tsx
+      <section className="flex min-w-0 flex-col lg:flex-1">
+```
+
+and the aside becomes:
+
+```tsx
+      <aside className="flex min-h-0 w-full flex-1 flex-col border-border lg:w-[380px] lg:flex-none lg:border-l">
+```
+
+`lg:flex-none` is doing real work: without it the `flex-1` would keep applying
+at desktop widths and fight the fixed `lg:w-[380px]`. It also replaces the old
+`lg:shrink-0`, which `flex-none` already implies.
+
+Verify at 390px that the rail fills everything below the now-playing bar with
+no black gap, and at `lg` that the player still grows and the rail holds its
+380px.
 
 - [ ] **Step 1: Rebuild the queue rows**
 

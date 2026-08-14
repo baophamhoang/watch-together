@@ -2822,15 +2822,19 @@ body {
 
 - [ ] **Step 7: Chrome MCP verification — landing page**
 
-Run `npm run dev`, then `tabs_create_mcp` to `http://localhost:3000`.
+Build and serve a production bundle — `npm run build && npm run start`. This also proves the page builds, which `npm run dev` does not.
 
-1. `read_page` to confirm the name field, "Start a room", the code input, and "Join" all render.
-2. `form_input` the name field with `bao`, then `computer` click "Start a room".
-3. Expected: the URL becomes `/r/<adjective>-<noun>-<4 chars>`. A 404 body is correct at this task — Task 14 adds the route.
-4. `navigate` back to `/`, then `read_page`. Expected: the name field shows `bao`, restored from storage.
-5. `form_input` the code field with `not-a-real-code` and click "Join". Expected: the error text appears and the URL does **not** change.
-6. `read_console_messages` with pattern `error` — expect nothing beyond the 404.
-7. `tabs_close_mcp`.
+1. `tabs_create_mcp`, then `navigate` to `http://localhost:3000`.
+2. Call `read_console_messages` once with any pattern **now**, purely to begin capture, then `navigate` to the same URL again to reload. Console tracking only starts when that tool is first called on a tab, so without this every page-load error is invisible and the check reports a clean console nobody observed.
+3. `read_page` to confirm the name field, "Start a room", the code input, and "Join" all render.
+4. `form_input` the name field with `bao`, then `computer` click "Start a room".
+5. Expected: the URL becomes `/r/<adjective>-<noun>-<4 chars>`. A 404 body is correct at this task — Task 14 adds the route.
+6. `navigate` back to `/`, then `read_page`. Expected: the name field shows `bao`, restored from storage.
+7. `form_input` the code field with `not-a-real-code` and click "Join". Expected: the error text appears and the URL does **not** change.
+8. `read_console_messages` with pattern `error` — expect nothing beyond the 404.
+9. Navigate the tab to `about:blank` rather than closing it. `tabs_close_mcp` has been observed resetting the extension's tab group and orphaning tabs; close only at the very end, and report any orphaned ids if the group resets anyway.
+
+Stop the server and confirm port 3000 is free.
 
 - [ ] **Step 8: Commit**
 

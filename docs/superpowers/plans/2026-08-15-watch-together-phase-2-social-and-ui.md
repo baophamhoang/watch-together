@@ -709,9 +709,12 @@ export function InviteBar({
 
   return (
     <div className="flex shrink-0 items-center justify-between gap-[var(--space-3)] border-b border-border px-[var(--space-3)] py-[var(--space-2)]">
-      <div className="flex min-w-0 items-center gap-[var(--space-2)]">
+      {/* `min-w-0` on both groups, and `shrink-0` on the presence stack below,
+          so a room with many peers squeezes the code rather than shunting the
+          status text off the edge. */}
+      <div className="flex min-w-0 flex-1 items-center gap-[var(--space-2)]">
         <code
-          className="truncate text-sm font-medium tracking-wide text-text"
+          className="min-w-0 truncate text-sm font-medium tracking-wide text-text"
           data-testid="room-code"
         >
           {code}
@@ -1563,6 +1566,19 @@ Row:
 In `AddTrackForm.tsx` and `app/page.tsx`, replace every `rounded-lg`, `border-neutral-*`, `bg-neutral-*` and `text-neutral-*` with the token equivalents (`rounded-[var(--radius-md)]`, `border-border`, `bg-surface`, `text-text` / `text-muted`). Error text uses `text-danger`.
 
 **Every text input takes `border border-border-strong`, not `border-border`.** `--surface` against `--bg` is only 1.07:1, so a filled field with a decorative border is effectively invisible — the strong border is the only thing that shows someone where to type, and it is the token measured to clear the 3:1 boundary floor. That applies to the nickname field, the room-code field, and the add-URL field. Keep every `data-testid`, the label text "Your name", the button labels "Start a room" and "Join", and the placeholder `word-word-abcd` — the e2e suite resolves elements by all of them.
+
+- [ ] **Step 2b: Close three accessibility and token gaps found reviewing earlier tasks**
+
+**`components/PresenceBar.tsx`** — wrap the initial so it is not announced alongside the name. A screen reader concatenates both text nodes today, so each avatar is read out twice — once as the glyph, once as the real name:
+
+```tsx
+<span aria-hidden="true">{initial}</span>
+<span className="sr-only">{isSelf ? `${entry.name}, you` : entry.name}</span>
+```
+
+Also bring its spacing onto the token scale: `-space-x-2` becomes `-space-x-[var(--space-2)]`, matching how the sibling `Toasts.tsx` spaces its items. Leave `h-8 w-8` and `border-2` — those are sizes, and no size token exists.
+
+**`components/Toasts.tsx`** — `shadow-black/40` is a raw colour. Swap the shadow for `border border-border`, which is a token and reads better against a dark surface anyway.
 
 - [ ] **Step 3: Check for token violations**
 

@@ -136,6 +136,15 @@ export function useRoom(code: string, name: string): RoomApi {
       // connected, which is independent of whether we happen to be host. Clearing
       // it would leave a later promotion — when the host departs — publishing a
       // roster that omits every peer already in the room.
+      // The replication refs, by contrast, MUST be reset. `shouldAcceptState`
+      // compares incoming state against `confirmedRef`, so a peer that briefly
+      // held the room and applied even one intent keeps a version high enough to
+      // reject the winner's authoritative state — and stays permanently diverged.
+      // That is precisely the failure the confirmed/display split exists to
+      // prevent, arriving through the back door.
+      confirmedRef.current = emptyRoomState()
+      displayRef.current = emptyRoomState()
+      pendingRef.current = []
       setState(emptyRoomState())
     }
 

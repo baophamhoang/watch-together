@@ -3,7 +3,7 @@
 import {useCallback, useEffect, useRef, useState} from 'react'
 import {SkipForward} from 'lucide-react'
 import {AddTrackForm} from './AddTrackForm'
-import {PresenceBar} from './PresenceBar'
+import {InviteBar} from './InviteBar'
 import {Queue} from './Queue'
 import {RoomTabs} from './RoomTabs'
 import {Toasts, type Toast} from './Toasts'
@@ -178,29 +178,13 @@ export function Room({code}: {code: string}) {
       </section>
 
       <aside className="flex min-h-0 w-full flex-col border-border lg:w-[380px] lg:shrink-0 lg:border-l">
-        {/* Room code + presence status: the code and status text predate this
-            task and are load-bearing for the e2e suite (startRoom() waits on
-            data-testid="room-code" before anything else runs) — both test ids
-            and the "N watching" status string must survive any future change
-            here. The avatar stack between them is this task's addition.
-            Invite is still a real task later in this plan: Task 4 replaces
-            this whole row with a designed invite bar. */}
-        <div className="flex shrink-0 items-center justify-between gap-[var(--space-2)] border-b border-border px-[var(--space-3)] py-[var(--space-2)] text-sm">
-          <code
-            className="rounded-[var(--radius-sm)] bg-surface-raised px-[var(--space-2)] py-[var(--space-1)] text-text"
-            data-testid="room-code"
-          >
-            {code}
-          </code>
-          <PresenceBar roster={room.roster} selfId={room.selfId} />
-          <span className="text-muted" data-testid="status">
-            {room.status === 'connected'
-              ? `${room.roster.length} watching${room.isHost ? ' · host' : ''}`
-              : room.status === 'blocked'
-                ? 'network blocked'
-                : 'connecting…'}
-          </span>
-        </div>
+        <InviteBar
+          code={code}
+          roster={room.roster}
+          selfId={room.selfId}
+          status={room.status}
+          isHost={room.isHost}
+        />
 
         {room.warning && (
           <p className="shrink-0 border-b border-border px-[var(--space-3)] py-[var(--space-2)] text-sm text-warn">

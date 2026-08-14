@@ -76,8 +76,18 @@ export function useRoom(
       stateAction.send(next)
     }
 
-    stateAction.onMessage = incoming => {
+    stateAction.onMessage = (incoming, {peerId}) => {
       if (isHostRef.current) return
+      // Only the host's own state is authoritative — anyone else's is either
+      // stale or forged. This check is safe only because every place that
+      // establishes us as host to a peer — `promote()` and the host branch of
+      // `room.onPeerJoin`, both below — calls `announce()` BEFORE
+      // `publishRoster()`/`stateAction.send()`. `hostIdRef` is set only by
+      // `beatAction.onMessage`, and beat/roster/state all travel the same
+      // ordered data channel per peer, so sending the beat first guarantees
+      // `hostIdRef` already names us by the time roster/state arrive here.
+      // Do not reorder announce() after the other two sends in either place.
+      if (peerId !== hostIdRef.current) return
       if (!shouldAcceptState(confirmedRef.current, incoming)) return
       showConfirmed(incoming)
     }
@@ -146,13 +156,16 @@ export function useRoom(
       isHostRef.current = true
       setIsHost(true)
       setStatus('connected')
-      publishRoster()
-      // Beat tie-resolution (below) depends on every promotion announcing itself,
-      // including the ordinary simultaneous-claim race — dropping this in favor
-      // of the state broadcast would leave a double-claim undetected, since
+      // Sent first — see the comment on stateAction.onMessage: receivers only
+      // accept roster/state once a beat has told them who the host is, so the
+      // beat must go out before publishRoster()/stateAction.send(), not after.
+      // This also covers beat tie-resolution, which depends on every
+      // promotion announcing itself, including the ordinary simultaneous-claim
+      // race — dropping this call would leave a double-claim undetected, since
       // stateAction.onMessage no-ops whenever the receiver already believes it
       // is host.
       announce()
+      publishRoster()
       // Seeds already-connected peers (and, after a host hand-off, the room)
       // with this host's replica instead of leaving them on stale state.
       stateAction.send(confirmedRef.current)
@@ -204,8 +217,11 @@ export function useRoom(
       }
     }
 
-    rosterAction.onMessage = entries => {
+    rosterAction.onMessage = (entries, {peerId}) => {
       if (isHostRef.current) return
+      // See the comment on stateAction.onMessage: same host-only gate, same
+      // announce-before-roster ordering requirement.
+      if (peerId !== hostIdRef.current) return
       rosterRef.current = entries
       setRoster(entries)
     }
@@ -220,14 +236,20 @@ export function useRoom(
       // find no survivors and leave the room hostless and frozen.
       joinOrderRef.current.set(peerId, nextJoinOrderRef.current++)
       if (isHostRef.current) {
+        // Re-announced first so the newcomer learns who the host is without
+        // waiting for the next beat. This broadcasts; it is not a targeted
+        // send. Sending it before the other two matters, not just as a nice-
+        // to-have: see the comment on stateAction.onMessage. Sending it last
+        // (as this used to) meant a brand new peer's very first roster and
+        // state — the two messages that actually seed their view of the
+        // room — arrived before any beat had set their hostIdRef, so the
+        // host-only gate on those handlers silently dropped both.
+        announce()
         publishRoster()
         // Targeted so the joiner gets the queue without waiting for the next
         // change; a broadcast here would also re-send stale state to peers
         // who are already caught up.
         stateAction.send(confirmedRef.current, {target: peerId})
-        // Re-announce so the newcomer learns who the host is without waiting for
-        // the next beat. This broadcasts; it is not a targeted send.
-        announce()
       }
       setStatus('connected')
     }
@@ -256,7 +278,17 @@ export function useRoom(
         return
       }
       // Guests render the change immediately; the host's broadcast replaces it.
-      displayRef.current = applyIntent(displayRef.current, intent, now)
+      // Mirror the host's no-op check above: an intent that would not change
+      // our own displayed state (e.g. play/pause/skip while nothing is
+      // current, or a duplicate remove) must not queue a pending entry — the
+      // host has nothing to acknowledge, so that entry could only ever age
+      // out and raise a false "lost contact" warning. This does not catch
+      // every case: an intent that is a no-op against the host's state but
+      // not ours still slips through, which needs per-peer sequence numbers
+      // we are deliberately not building here.
+      const next = applyIntent(displayRef.current, intent, now)
+      if (next === displayRef.current) return
+      displayRef.current = next
       pendingRef.current = [...pendingRef.current, {intent, sentAt: now}]
       setState(displayRef.current)
       intentAction.send(intent)

@@ -1453,10 +1453,32 @@ Phones block programmatic playback, so a joiner's player never starts and the dr
 **Files:**
 - Create: `components/TapToWatch.tsx`
 - Modify: `components/Room.tsx`
+- Modify: `app/globals.css`
 
 **Interfaces:**
 - Consumes: `PlayerHandle` from `lib/youtube/use-player.ts`
 - Produces: `<TapToWatch onActivate />`
+
+- [ ] **Step 0: Define the scrim token**
+
+Three overlays now dim the player — `loadError`, `localBlock` and this gate —
+and all three reached for a raw `bg-black/8x`, which the token rule forbids.
+One token, defined once and used by all three, is the fix; converting only the
+new one would leave the file less consistent than it started.
+
+In `app/globals.css`, beside the other colour tokens:
+
+```css
+  /* Dims the video behind any overlay that needs to be read over it. Not a
+     surface — it is always composited over unknown video frames, which is
+     why it is an alpha rather than one of the flat surface colours. */
+  --scrim: rgb(0 0 0 / 0.85);
+```
+
+Then in `components/Room.tsx`, replace `bg-black/85` on **both** existing
+`PlayerOverlay` backdrops with `bg-[var(--scrim)]`. The new gate uses the same
+token, so all three match at 0.85 — slightly darker than the gate's original
+0.80, which only helps the text contrast over a bright frame.
 
 - [ ] **Step 1: Write the gate**
 
@@ -1472,13 +1494,25 @@ export function TapToWatch({onActivate}: {onActivate(): void}) {
     <button
       onClick={onActivate}
       data-testid="tap-to-watch"
-      className="absolute inset-0 flex flex-col items-center justify-center gap-[var(--space-3)] bg-black/80 cursor-pointer"
+      // Without an explicit label the accessible name is built from every
+      // descendant text node, so this button announces as "Tap to watch
+      // Browsers need one tap before they will start a video with sound."
+      // — one run-on string, on the single most important control a phone
+      // joiner meets. `aria-label` wins over name-from-content, and
+      // `aria-describedby` keeps the explanation as a description rather
+      // than discarding it.
+      aria-label="Tap to watch"
+      aria-describedby="tap-to-watch-hint"
+      className="absolute inset-0 flex flex-col items-center justify-center gap-[var(--space-3)] bg-[var(--scrim)] cursor-pointer"
     >
       <span className="flex h-16 w-16 items-center justify-center rounded-[var(--radius-full)] bg-text text-bg">
         <Play size={28} aria-hidden />
       </span>
       <span className="text-sm text-text">Tap to watch</span>
-      <span className="max-w-xs px-[var(--space-4)] text-center text-xs text-muted">
+      <span
+        id="tap-to-watch-hint"
+        className="max-w-xs px-[var(--space-4)] text-center text-xs text-muted"
+      >
         Browsers need one tap before they will start a video with sound.
       </span>
     </button>
@@ -1503,15 +1537,28 @@ Inside the player shell, after the existing overlays:
 {!activated && !loadError && !localBlock && (
   <TapToWatch
     onActivate={() => {
+      // A tap before the IFrame API has finished loading must not dismiss
+      // the gate. `handle` is null across a real network round trip, and
+      // the gate is the largest thing on screen from first paint, so an
+      // early tap is likely on exactly the slow mobile connections this
+      // feature exists for. Dismissing on that tap would strand the user:
+      // the gate never returns (`activated` is one-way), and the play()
+      // that useSyncPlayback issues once the handle appears comes from an
+      // effect, carries no user activation, and is blocked by the very
+      // policy this gate exists to satisfy — leaving a dead player with
+      // no affordance and nothing on screen suggesting a reload.
+      if (!handle) return
       setActivated(true)
       // Called inside the click handler so it runs under a real user
       // gesture — that activation is exactly what the autoplay policy
       // requires, and it does not survive an async hop.
-      handle?.play()
+      handle.play()
     }}
   />
 )}
 ```
+
+Returning early leaves the gate up, so the next tap is its own fresh, valid gesture. It stays fully synchronous: no `await`, no timer, nothing between the click and `play()`.
 
 The gate stays up until it is tapped, which is what makes an empty room work: a user who arrives before any video exists adds one from the rail, the gate is still covering the player, and their tap both dismisses it and starts playback under a real gesture. Deferring the gate until a track existed would move the tap to the worst possible moment.
 

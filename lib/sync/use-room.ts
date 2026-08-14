@@ -4,7 +4,8 @@ import {useEffect, useRef, useState} from 'react'
 import {joinRoom, selfId} from 'trystero'
 import {APP_ID, HOST_CLAIM_MS} from './constants'
 import {electHost, resolveHostTie} from './election'
-import {emptyRoomState} from './room-reducer'
+import {expirePending, shouldAcceptState, type PendingIntent} from './pending'
+import {applyIntent, emptyRoomState} from './room-reducer'
 import type {Beat, Intent, RoomState, RosterEntry} from './types'
 
 export type RoomStatus = 'connecting' | 'connected' | 'blocked'
@@ -18,6 +19,7 @@ export type RoomApi = {
   beat: Beat | null
   offsetMs: number | null
   send(intent: Intent): void
+  warning: string | null
 }
 
 export function useRoom(code: string, name: string): RoomApi {
@@ -27,6 +29,7 @@ export function useRoom(code: string, name: string): RoomApi {
   const [status, setStatus] = useState<RoomStatus>('connecting')
   const [beat] = useState<Beat | null>(null)
   const [offsetMs] = useState<number | null>(null)
+  const [warning, setWarning] = useState<string | null>(null)
 
   const isHostRef = useRef(false)
   const joinOrderRef = useRef(new Map<string, number>())
@@ -42,6 +45,37 @@ export function useRoom(code: string, name: string): RoomApi {
     // `.onMessage`. The older `const [send, get] = makeAction()` tuple is gone.
     const beatAction = room.makeAction<Beat>('beat')
     const rosterAction = room.makeAction<RosterEntry[]>('roster')
+    const stateAction = room.makeAction<RoomState>('state')
+    const intentAction = room.makeAction<Intent>('intent')
+
+    /** Last state issued by the host. The only basis for version comparison. */
+    const confirmedRef = {current: emptyRoomState()}
+    /** What the user sees: confirmed state plus any un-acknowledged local intents. */
+    const displayRef = {current: emptyRoomState()}
+    const pendingRef = {current: [] as PendingIntent[]}
+
+    const showConfirmed = (next: RoomState) => {
+      confirmedRef.current = next
+      displayRef.current = next
+      pendingRef.current = []
+      setState(next)
+      setWarning(null)
+    }
+
+    // Host is the only writer: apply, then broadcast the new authoritative state.
+    intentAction.onMessage = intent => {
+      if (!isHostRef.current) return
+      const next = applyIntent(confirmedRef.current, intent, Date.now())
+      if (next === confirmedRef.current) return
+      showConfirmed(next)
+      stateAction.send(next)
+    }
+
+    stateAction.onMessage = incoming => {
+      if (isHostRef.current) return
+      if (!shouldAcceptState(confirmedRef.current, incoming)) return
+      showConfirmed(incoming)
+    }
 
     const nameRef = new Map<string, string>()
 
@@ -84,7 +118,15 @@ export function useRoom(code: string, name: string): RoomApi {
       setIsHost(true)
       setStatus('connected')
       publishRoster()
+      // Beat tie-resolution (below) depends on every promotion announcing itself,
+      // including the ordinary simultaneous-claim race — dropping this in favor
+      // of the state broadcast would leave a double-claim undetected, since
+      // stateAction.onMessage no-ops whenever the receiver already believes it
+      // is host.
       announce()
+      // Seeds already-connected peers (and, after a host hand-off, the room)
+      // with this host's replica instead of leaving them on stale state.
+      stateAction.send(confirmedRef.current)
     }
 
     const demote = () => {
@@ -129,6 +171,10 @@ export function useRoom(code: string, name: string): RoomApi {
       joinOrderRef.current.set(peerId, nextJoinOrderRef.current++)
       if (isHostRef.current) {
         publishRoster()
+        // Targeted so the joiner gets the queue without waiting for the next
+        // change; a broadcast here would also re-send stale state to peers
+        // who are already caught up.
+        stateAction.send(confirmedRef.current, {target: peerId})
         // Re-announce so the newcomer learns who the host is without waiting for
         // the next beat. This broadcasts; it is not a targeted send.
         announce()
@@ -150,10 +196,36 @@ export function useRoom(code: string, name: string): RoomApi {
       if (electHost(survivors) === selfId) promote()
     }
 
-    sendRef.current = () => {}
+    sendRef.current = (intent: Intent) => {
+      const now = Date.now()
+      if (isHostRef.current) {
+        const next = applyIntent(confirmedRef.current, intent, now)
+        if (next === confirmedRef.current) return
+        showConfirmed(next)
+        stateAction.send(next)
+        return
+      }
+      // Guests render the change immediately; the host's broadcast replaces it.
+      displayRef.current = applyIntent(displayRef.current, intent, now)
+      pendingRef.current = [...pendingRef.current, {intent, sentAt: now}]
+      setState(displayRef.current)
+      intentAction.send(intent)
+    }
+
+    // An intent the host never acknowledged means we lost the authority.
+    const pendingTimer = setInterval(() => {
+      if (isHostRef.current || pendingRef.current.length === 0) return
+      const {kept, expired} = expirePending(pendingRef.current, Date.now())
+      if (expired.length === 0) return
+      pendingRef.current = kept
+      displayRef.current = confirmedRef.current
+      setState(confirmedRef.current)
+      setWarning('Lost contact with the host — that change did not stick.')
+    }, 500)
 
     return () => {
       clearTimeout(claimTimer)
+      clearInterval(pendingTimer)
       room.leave()
     }
     // Reconnect only when the room identity changes.
@@ -169,5 +241,6 @@ export function useRoom(code: string, name: string): RoomApi {
     beat,
     offsetMs,
     send: intent => sendRef.current(intent),
+    warning,
   }
 }

@@ -2,7 +2,7 @@
 
 import {loadIframeApi} from './iframe-api'
 
-const PROBE_TIMEOUT_MS = 8000
+const PROBE_TIMEOUT_MS = 2500
 /** getDuration() occasionally reports 0 until metadata lands; retry once. */
 const RETRY_DELAY_MS = 500
 

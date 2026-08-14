@@ -3248,9 +3248,13 @@ export function Room({code}: {code: string}) {
 
 - [ ] **Step 9: Chrome MCP verification — the whole product**
 
-Run `npm run dev`. Open tab A via `tabs_create_mcp` to `http://localhost:3000`, click "Start a room", and read the resulting `/r/<code>` URL. Open tab B with `tabs_create_mcp` to that same URL.
+Build and serve a production bundle: `npm run build && npm run start`. Do **not** use `npm run dev` — React Strict Mode double-invokes effects and races Trystero's room cache, so two tabs intermittently both believe they are host. That is a dev-only ghost and it will waste your time.
 
-Walk through, using `computer` to click and `form_input` to type, and `read_page` to check results:
+Open tab A via `tabs_create_mcp` to `http://localhost:3000`. Before doing anything else, call `read_console_messages` once with any pattern to begin capture, then reload — console tracking only starts when that tool is first called on a tab, so page-load errors are otherwise invisible and you would report a clean console you never observed. Repeat that capture-then-reload on tab B once it exists.
+
+Then click "Start a room" in tab A and read the resulting `/r/<code>` URL. Open tab B with `tabs_create_mcp` to that same URL.
+
+Walk through, using `computer` to click and `form_input` to type, and `read_page` to check results. Note that ref-based clicks have been seen to silently no-op; if a click appears to do nothing, retry with coordinates.
 
 1. Both tabs show `2 watching`, exactly one marked `host`.
 2. Paste `https://youtu.be/dQw4w9WgXcQ` into tab A's add field and submit. Both tabs show the track with its title, author, and a real duration (`3:33`), not `—`. A `—` means the duration probe failed — check the console before moving on.

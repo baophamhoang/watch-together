@@ -38,7 +38,7 @@ Call `tabs_context_mcp` first to see existing tabs, then `tabs_create_mcp` for n
 - Package manager is **npm** (repo has `package-lock.json`).
 - **No YouTube Data API key anywhere.** Metadata comes only from the keyless `youtube.com/oembed` endpoint and the IFrame Player API.
 - **No YouTube player wrapper library.** Use the official IFrame Player API directly.
-- Everything under `lib/sync/` **except** `use-room.ts` must be pure — no I/O, no React, no `Date.now()` passed implicitly (time is always a parameter).
+- Everything under `lib/sync/` **except** the two React hooks (`use-room.ts`, `use-sync-playback.ts`) must be pure — no I/O, no React, no `Date.now()` passed implicitly (time is always a parameter). The hooks are the only impure modules there: `use-room.ts` owns the network, `use-sync-playback.ts` owns the correction timer. Everything they orchestrate — the reducer, the clock estimator, the drift ladder, election, pending expiry — stays pure and directly testable.
 - Components never import `trystero` directly; they consume `useRoom()`.
 - Queue identity is a per-entry `uuid`, never the YouTube video id. The same video may be queued twice.
 - Drift constants are exact: dead zone `0.5s`, resync indicator above `2s`, correction cooldown `3000ms`, post-seek suppression `2000ms`.
@@ -3508,9 +3508,11 @@ If `offsetMs` is `null` on the guest, no beat is reaching it; confirm the host's
 
 1. `computer` click the player in tab A to pause. Wait 2 seconds, then `readAt()` in both: `isPlaying` false in both, and positions within 0.5s.
 2. Click again to resume. Both report `isPlaying` true.
-3. In tab B, use the YouTube progress bar to seek roughly halfway. Within ~3 seconds both `readAt()` positions should agree within 1.5s.
+3. In the **host** tab, use the YouTube progress bar to seek roughly halfway. Within ~3 seconds both `readAt()` positions should agree within 1.5s.
 
-> Seeking via the YouTube control is a genuine user path and exercises `onUserPause`/`onUserPlay` suppression. If tab B's seek bounces back, the suppression window in `use-player.ts` is too short and the correction loop is fighting the user.
+> **Seek only from the host.** A guest cannot move the room's position in phase 1: no UI emits a `seek` intent, and `use-player.ts` has no seek detection — dragging the progress bar produces BUFFERING then PLAYING, which maps to a positionless `play` intent. The drift loop therefore pulls a guest's seek back within a few seconds. **That is the designed behaviour, not a bug**, and no amount of suppression tuning changes it. The host's seek propagates for free, because the heartbeat carries the host's live `getCurrentTime()`.
+>
+> Guest-initiated seek is deferred. Building it means detecting a position discontinuity in `onStateChange` and emitting `{type: 'seek', position}` — the reducer and the `seek` intent already exist and are tested, so only the detection is missing.
 
 - [ ] **Step 5: Record the evidence**
 

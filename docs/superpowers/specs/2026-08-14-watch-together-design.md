@@ -368,15 +368,20 @@ lib/
   sync/clock.ts               offset estimation, pure
   sync/drift.ts               correction ladder, pure, tested
   sync/election.ts            host election, pure, tested
-  sync/use-room.ts            Trystero binding, the only impure piece
+  sync/pending.ts             optimistic-intent expiry, pure, tested
+  sync/use-room.ts            Trystero binding, impure
+  sync/use-sync-playback.ts   drives the player from room state, impure
   chat/types.ts
   gifs/provider.ts            swappable adapter
   room-code.ts                pure, tested
 components/                   presentational, no transport knowledge
 ```
 
-The boundary that matters: everything under `lib/sync` except `use-room.ts` is
-pure and testable, and components never touch Trystero directly.
+The boundary that matters: `lib/sync` holds exactly two impure modules — the
+hook that owns the network (`use-room.ts`) and the hook that owns the correction
+timer (`use-sync-playback.ts`). Everything they orchestrate is pure and directly
+testable: the reducer, the clock estimator, the drift ladder, host election,
+pending expiry. Components never touch Trystero directly.
 
 ## Phases
 

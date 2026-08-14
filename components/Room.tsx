@@ -105,7 +105,7 @@ export function Room({code}: {code: string}) {
   return (
     <main className="mx-auto flex min-h-dvh max-w-6xl flex-col gap-4 p-4 lg:flex-row">
       <section className="flex-1">
-        <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black">
+        <div className="yt-player-shell relative aspect-video w-full overflow-hidden rounded-xl bg-black">
           <div ref={containerRef} className="h-full w-full" />
           {loadError && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/85 p-6 text-center">

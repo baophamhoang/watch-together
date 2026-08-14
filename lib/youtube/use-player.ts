@@ -49,7 +49,15 @@ export function useYouTubePlayer(events: PlayerEvents) {
         if (cancelled || !containerRef.current) return
 
         player = new YT.Player(containerRef.current, {
-          playerVars: {playsinline: 1, rel: 0, modestbranding: 1},
+          // No pixel width/height: the shell is sized responsively via CSS
+          // (see .yt-player-shell in globals.css), not the player API.
+          // `origin` is YouTube's recommended postMessage-channel restriction.
+          playerVars: {
+            playsinline: 1,
+            rel: 0,
+            modestbranding: 1,
+            origin: window.location.origin,
+          },
           events: {
             onReady: () => {
               if (!cancelled) setReady(true)

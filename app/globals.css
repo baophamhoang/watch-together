@@ -29,3 +29,12 @@ body {
   background-color: #0a0a0a;
   color: #ededed;
 }
+
+/* The IFrame API replaces our container div with an iframe that inherits
+   neither its classes nor its styles, and defaults to 640x390. */
+.yt-player-shell iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}

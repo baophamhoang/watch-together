@@ -206,9 +206,9 @@ export function Room({code}: {code: string}) {
 
         <RoomTabs
           unreadCount={unread}
-          onChatOpened={() => {
-            chatOpen.current = true
-            setUnread(0)
+          onTabChange={next => {
+            chatOpen.current = next === 'chat'
+            if (next === 'chat') setUnread(0)
           }}
           queue={
             <div className="flex flex-col gap-[var(--space-3)] p-[var(--space-3)]">

@@ -7,14 +7,19 @@ export function RoomTabs({
   queue,
   chat,
   unreadCount,
-  onChatOpened,
+  onTabChange,
 }: {
   queue: ReactNode
   chat: ReactNode
   unreadCount: number
-  onChatOpened?: () => void
+  onTabChange?: (tab: 'queue' | 'chat') => void
 }) {
   const [tab, setTab] = useState<'queue' | 'chat'>('queue')
+
+  const select = (next: 'queue' | 'chat') => {
+    setTab(next)
+    onTabChange?.(next)
+  }
 
   const tabClass = (active: boolean) =>
     [
@@ -33,7 +38,7 @@ export function RoomTabs({
           id="tab-queue"
           aria-controls="panel-queue"
           aria-selected={tab === 'queue'}
-          onClick={() => setTab('queue')}
+          onClick={() => select('queue')}
           className={tabClass(tab === 'queue')}
         >
           <ListVideo size={16} aria-hidden />
@@ -44,10 +49,7 @@ export function RoomTabs({
           id="tab-chat"
           aria-controls="panel-chat"
           aria-selected={tab === 'chat'}
-          onClick={() => {
-            setTab('chat')
-            onChatOpened?.()
-          }}
+          onClick={() => select('chat')}
           className={tabClass(tab === 'chat')}
         >
           <MessageSquare size={16} aria-hidden />

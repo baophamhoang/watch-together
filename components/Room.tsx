@@ -3,6 +3,8 @@
 import {useCallback, useEffect, useRef, useState} from 'react'
 import {SkipForward} from 'lucide-react'
 import {AddTrackForm} from './AddTrackForm'
+import {ChatComposer} from './ChatComposer'
+import {ChatPanel} from './ChatPanel'
 import {InviteBar} from './InviteBar'
 import {Queue} from './Queue'
 import {RoomTabs} from './RoomTabs'
@@ -127,6 +129,16 @@ export function Room({code}: {code: string}) {
     [],
   )
 
+  const [unread, setUnread] = useState(0)
+  const seenCount = useRef(0)
+  const chatOpen = useRef(false)
+
+  useEffect(() => {
+    const added = room.messages.length - seenCount.current
+    seenCount.current = room.messages.length
+    if (added > 0 && !chatOpen.current) setUnread(u => u + added)
+  }, [room.messages.length])
+
   const add = (track: Track) => room.send({type: 'enqueue', track})
 
   return (
@@ -193,7 +205,11 @@ export function Room({code}: {code: string}) {
         )}
 
         <RoomTabs
-          unreadCount={0}
+          unreadCount={unread}
+          onChatOpened={() => {
+            chatOpen.current = true
+            setUnread(0)
+          }}
           queue={
             <div className="flex flex-col gap-[var(--space-3)] p-[var(--space-3)]">
               <AddTrackForm onAdd={add} addedBy={{peerId: room.selfId, name}} />
@@ -204,9 +220,11 @@ export function Room({code}: {code: string}) {
             </div>
           }
           chat={
-            <p className="p-[var(--space-3)] text-sm text-muted">
-              Chat arrives in the next task.
-            </p>
+            <ChatPanel
+              messages={room.messages}
+              selfId={room.selfId}
+              composer={<ChatComposer onSend={body => room.sendChat('text', body)} />}
+            />
           }
         />
       </aside>

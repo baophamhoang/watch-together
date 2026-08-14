@@ -2,6 +2,8 @@
 
 import {type RefObject, useEffect, useRef, useState} from 'react'
 import {joinRoom, selfId} from 'trystero'
+import {appendMessage} from '@/lib/chat/messages'
+import type {ChatKind, ChatMessage} from '@/lib/chat/types'
 import {bestOffset, makeSample, pushSample, type ClockSample} from './clock'
 import {APP_ID, BEAT_INTERVAL_MS, CLOCK_BURST_SAMPLES, CLOCK_RESAMPLE_MS, HOST_CLAIM_MS} from './constants'
 import {electHost, resolveHostTie} from './election'
@@ -21,6 +23,8 @@ export type RoomApi = {
   offsetMs: number | null
   send(intent: Intent): void
   warning: string | null
+  messages: ChatMessage[]
+  sendChat(kind: ChatKind, body: string): void
 }
 
 export function useRoom(
@@ -35,11 +39,13 @@ export function useRoom(
   const [beat, setBeat] = useState<Beat | null>(null)
   const [offsetMs, setOffsetMs] = useState<number | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
+  const [messages, setMessages] = useState<ChatMessage[]>([])
 
   const isHostRef = useRef(false)
   const joinOrderRef = useRef(new Map<string, number>())
   const nextJoinOrderRef = useRef(1)
   const sendRef = useRef<(intent: Intent) => void>(() => {})
+  const sendChatRef = useRef<(kind: ChatKind, body: string) => void>(() => {})
 
   useEffect(() => {
     const room = joinRoom({appId: APP_ID}, code, {
@@ -57,6 +63,7 @@ export function useRoom(
     const rosterAction = room.makeAction<RosterEntry[]>('roster')
     const stateAction = room.makeAction<RoomState>('state')
     const intentAction = room.makeAction<Intent>('intent')
+    const chatAction = room.makeAction<ChatMessage>('chat')
 
     /** Last state issued by the host. The only basis for version comparison. */
     const confirmedRef = {current: emptyRoomState()}
@@ -95,6 +102,13 @@ export function useRoom(
       if (peerId !== hostIdRef.current) return
       if (!shouldAcceptState(confirmedRef.current, incoming)) return
       showConfirmed(incoming)
+    }
+
+    chatAction.onMessage = incoming => {
+      // Deliberately not gated on hostIdRef: chat needs no ordering guarantee and
+      // should keep working through a host hand-off. The peer's own claimed name
+      // is used as-is — this is a room you shared a code with, not a public space.
+      setMessages(current => appendMessage(current, incoming))
     }
 
     const nameRef = new Map<string, string>()
@@ -304,6 +318,21 @@ export function useRoom(
       fire(intentAction.send(intent))
     }
 
+    sendChatRef.current = (kind, body) => {
+      const trimmed = body.trim()
+      if (!trimmed) return
+      const message: ChatMessage = {
+        id: crypto.randomUUID(),
+        peerId: selfId,
+        name,
+        kind,
+        body: trimmed,
+        at: Date.now(),
+      }
+      setMessages(current => appendMessage(current, message))
+      fire(chatAction.send(message))
+    }
+
     // An intent the host never acknowledged means we lost the authority.
     const pendingTimer = setInterval(() => {
       if (isHostRef.current || pendingRef.current.length === 0) return
@@ -344,5 +373,7 @@ export function useRoom(
     offsetMs,
     send: intent => sendRef.current(intent),
     warning,
+    messages,
+    sendChat: (kind, body) => sendChatRef.current(kind, body),
   }
 }

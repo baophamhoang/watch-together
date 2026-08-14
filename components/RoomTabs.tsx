@@ -7,10 +7,12 @@ export function RoomTabs({
   queue,
   chat,
   unreadCount,
+  onChatOpened,
 }: {
   queue: ReactNode
   chat: ReactNode
   unreadCount: number
+  onChatOpened?: () => void
 }) {
   const [tab, setTab] = useState<'queue' | 'chat'>('queue')
 
@@ -42,7 +44,10 @@ export function RoomTabs({
           id="tab-chat"
           aria-controls="panel-chat"
           aria-selected={tab === 'chat'}
-          onClick={() => setTab('chat')}
+          onClick={() => {
+            setTab('chat')
+            onChatOpened?.()
+          }}
           className={tabClass(tab === 'chat')}
         >
           <MessageSquare size={16} aria-hidden />

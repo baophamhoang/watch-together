@@ -26,6 +26,8 @@ ToolSearch: select:mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome
 
 Call `tabs_context_mcp` first to see existing tabs, then `tabs_create_mcp` for new ones — never reuse a tab id from an earlier session. Close the tabs you opened when the check finishes. Do not trigger `alert`/`confirm` dialogs; they block the extension. If a browser step fails 2-3 times, stop and report rather than retrying blindly.
 
+> **Drive a production build, not `npm run dev`.** Use `npm run build && npm run start` for every browser verification. React Strict Mode double-invokes effects in development — mount, unmount, mount — and Trystero caches rooms by app id and room id while `leave()` tears down asynchronously. The phantom mount's teardown therefore races the surviving mount's `joinRoom()`, and the two can share a room mid-teardown. In dev this shows up intermittently as both tabs believing they are host, which is a ghost, not a defect in the code under test. A production build does not double-mount and is what users actually run. Discovered during Task 10.
+
 > **Console capture starts late — reload before trusting it.** `read_console_messages` only records from the moment it is *first called on that tab*. Navigate, then call it once (with any pattern) purely to begin tracking, then reload the page and do the actual work. Skip that and every error thrown during page load is invisible, and the check reports a clean console that was never observed — a false pass, which is worse than no check. Verified against the live extension on 2026-08-14.
 
 ## Global Constraints
@@ -1934,21 +1936,35 @@ Temporarily replace the body of `app/page.tsx` with a probe that exposes the hoo
 ```tsx
 'use client'
 
-import {useRef} from 'react'
 import {useRoom} from '@/lib/sync/use-room'
 
 export default function Probe() {
-  const positionRef = useRef<() => number>(() => 0)
-  const room = useRoom('ember-otter-k7qm', 'probe', positionRef)
+  // Two arguments here: `useRoom` does not gain its third parameter until
+  // Task 12, when the host's heartbeat needs a live player position.
+  const room = useRoom('ember-otter-k7qm', 'probe')
   return (
     <pre data-testid="probe">
-      {JSON.stringify({status: room.status, isHost: room.isHost, peers: room.roster.length})}
+      {JSON.stringify({
+        status: room.status,
+        isHost: room.isHost,
+        self: room.selfId,
+        // Peer ids, not a count. `publishRoster` always includes self, so a
+        // bare length is easy to misread — ids make it unambiguous who each
+        // peer believes is in the room.
+        roster: room.roster.map(entry => entry.peerId),
+      })}
     </pre>
   )
 }
 ```
 
-Start the server: `npm run dev`
+**Build and serve a production bundle — do not use `npm run dev` for this check:**
+
+```bash
+npm run build && npm run start
+```
+
+React Strict Mode double-invokes effects in development (mount, unmount, mount). Trystero caches rooms by app id and room id, and `leave()` tears down asynchronously, so the phantom mount's teardown races the surviving mount's `joinRoom()` and they can share a room mid-teardown. The result in dev is intermittent: sometimes both tabs believe they are host. A production build does not double-mount, and is also what users actually run. See the deferred note about making the hook resilient to fast remounts.
 
 Then, with the Chrome MCP tools loaded (see "Verification layers"):
 
@@ -1962,12 +1978,16 @@ console.log('[probe]', document.querySelector('[data-testid=probe]').textContent
 
 4. `read_console_messages` with pattern `\[probe\]` on each tab.
 
-Expected: both tabs report `"status":"connected"` and `"peers":1`, and **exactly one** reports `"isHost":true`.
+Expected: both tabs report `"status":"connected"`, **exactly one** reports `"isHost":true`, and each tab's `roster` contains **both** peers' ids — its own `self` value and the other tab's.
+
+Report the two `roster` arrays verbatim. If a tab's roster holds only its own id while both are plainly connected, that is a real defect in roster propagation, not a wording quibble — say so rather than moving on, because Task 14 renders this as the "N watching" presence row.
 
 If both claim host, the presence `announce()` is not reaching the other peer, or `resolveHostTie` is not demoting the loser — do not proceed to Task 11 until exactly one host survives, because every later task assumes a single writer.
 
 4. Also run `read_console_messages` with pattern `error|failed` and confirm no relay or WebRTC errors.
-5. Close the second tab with `tabs_close_mcp` and re-read the probe in the first: it should report `"peers":0` and still exactly one host.
+5. Close the second tab with `tabs_close_mcp` and re-read the probe in the first: it should still report exactly one host, and its `roster` should shrink back to just its own id.
+
+Note the roster never empties — `publishRoster` always lists self first, so any peer that has been host reports at least one entry. Do not expect zero.
 6. `tabs_close_mcp` on the remaining tab, then revert `app/page.tsx`.
 
 - [ ] **Step 5: Commit**

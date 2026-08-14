@@ -217,10 +217,12 @@ but do not act, which prevents double-skips.
 
 ## Room lifecycle
 
-Room codes are two words from a 512-word list plus two digits
-(`ember-otter-42`), roughly 26 million combinations. The room URL `/r/ember-otter-42`
-*is* the invite. Trystero derives its signaling encryption key from the app ID
-and room ID, so a peer without the exact code cannot join or read signaling.
+Room codes are an adjective and a noun drawn from two 64-word lists plus a
+four-character suffix from a 31-character alphabet that omits `i`, `l`, `o`, `0`,
+and `1` so codes survive being read aloud — `ember-otter-k7qm`, about 3.8 billion
+combinations. The room URL `/r/ember-otter-k7qm` *is* the invite. Trystero derives
+its signaling encryption key from the app ID and room ID, so a peer without the
+exact code cannot join or read signaling.
 
 Joining and creating are the same action: join the Trystero room, listen for an
 existing host's `beat` for 1.5 seconds, and self-promote if none arrives.

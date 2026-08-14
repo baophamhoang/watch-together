@@ -24,7 +24,9 @@ Tasks with a **Chrome MCP verification** step are not complete until it passes. 
 ToolSearch: select:mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__tabs_create_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__computer,mcp__claude-in-chrome__read_page,mcp__claude-in-chrome__javascript_tool,mcp__claude-in-chrome__read_console_messages,mcp__claude-in-chrome__form_input,mcp__claude-in-chrome__tabs_close_mcp
 ```
 
-Call `tabs_context_mcp` first to see existing tabs, then `tabs_create_mcp` for new ones — never reuse a tab id from an earlier session. Close the tabs you opened when the check finishes. Do not trigger `alert`/`confirm` dialogs; they block the extension. If a browser step fails 2-3 times, stop and report rather than retrying blindly.
+Call `tabs_context_mcp` first to see existing tabs, then `tabs_create_mcp` for new ones — never reuse a tab id from an earlier session. Do not trigger `alert`/`confirm` dialogs; they block the extension. If a browser step fails 2-3 times, stop and report rather than retrying blindly.
+
+> **Prefer navigating a tab away over closing it.** During Task 10, `tabs_close_mcp` correlated with a tab-group session reset five separate times, each one orphaning tabs that no tool could then reach. To "remove" a peer from a room, navigate that tab to `about:blank` instead — it leaves the room exactly as a close would, without risking the reset. Close tabs only at the very end of a check, and if the group resets anyway, do not fight it: report the orphaned tab ids so a human can close them.
 
 > **Drive a production build, not `npm run dev`.** Use `npm run build && npm run start` for every browser verification. React Strict Mode double-invokes effects in development — mount, unmount, mount — and Trystero caches rooms by app id and room id while `leave()` tears down asynchronously. The phantom mount's teardown therefore races the surviving mount's `joinRoom()`, and the two can share a room mid-teardown. In dev this shows up intermittently as both tabs believing they are host, which is a ghost, not a defect in the code under test. A production build does not double-mount and is what users actually run. Discovered during Task 10.
 
@@ -1854,7 +1856,10 @@ export function useRoom(code: string, name: string): RoomApi {
     const demote = () => {
       isHostRef.current = false
       setIsHost(false)
-      joinOrderRef.current.clear()
+      // `joinOrderRef` is deliberately NOT cleared here: it records who is
+      // connected, which is independent of whether we happen to be host.
+      // Clearing it would leave a later promotion — when the host departs —
+      // publishing a roster that omits every peer already in the room.
       setState(emptyRoomState())
     }
 
@@ -1881,10 +1886,18 @@ export function useRoom(code: string, name: string): RoomApi {
 
     room.onPeerJoin = peerId => {
       nameRef.set(peerId, 'friend')
+      // Recorded for EVERY peer, not only while we are host. `onPeerJoin`
+      // fires once per peer and never again, so when two tabs connect before
+      // either has claimed the room — the ordinary case when a link is shared
+      // — a host-gated version misses the other peer permanently. Both would
+      // then publish a roster containing only themselves, and a later
+      // successor election would find no survivors and leave the room
+      // hostless and frozen.
+      joinOrderRef.current.set(peerId, nextJoinOrderRef.current++)
       if (isHostRef.current) {
-        joinOrderRef.current.set(peerId, nextJoinOrderRef.current++)
         publishRoster()
-        // Tell the newcomer who the host is without waiting for the next beat.
+        // Re-announce so the newcomer learns who the host is without waiting
+        // for the next beat. This broadcasts; it is not a targeted send.
         announce()
       }
       setStatus('connected')

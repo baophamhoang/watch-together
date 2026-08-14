@@ -1497,7 +1497,10 @@ Add state and render the gate over the player until it is dismissed:
 Inside the player shell, after the existing overlays:
 
 ```tsx
-{!activated && !loadError && (
+{/* Suppressed alongside the other two overlays rather than stacked on top
+    of them: this renders last, so an un-suppressed gate would sit above
+    the unplayable overlay and swallow its "Skip for everyone" button. */}
+{!activated && !loadError && !localBlock && (
   <TapToWatch
     onActivate={() => {
       setActivated(true)
@@ -1509,6 +1512,8 @@ Inside the player shell, after the existing overlays:
   />
 )}
 ```
+
+The gate stays up until it is tapped, which is what makes an empty room work: a user who arrives before any video exists adds one from the rail, the gate is still covering the player, and their tap both dismisses it and starts playback under a real gesture. Deferring the gate until a track existed would move the tap to the worst possible moment.
 
 - [ ] **Step 3: Verify on a narrow viewport**
 

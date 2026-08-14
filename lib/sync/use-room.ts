@@ -146,6 +146,7 @@ export function useRoom(code: string, name: string): RoomApi {
       displayRef.current = emptyRoomState()
       pendingRef.current = []
       setState(emptyRoomState())
+      setWarning(null)
     }
 
     // Claim the room only if no existing host announced itself first.
@@ -227,8 +228,16 @@ export function useRoom(code: string, name: string): RoomApi {
       const {kept, expired} = expirePending(pendingRef.current, Date.now())
       if (expired.length === 0) return
       pendingRef.current = kept
-      displayRef.current = confirmedRef.current
-      setState(confirmedRef.current)
+      // Rebuild the display from confirmed state plus the intents still in
+      // flight, rather than hard-resetting to confirmed alone. Keeping an entry
+      // in `pendingRef` while erasing its visual effect is self-contradictory:
+      // the user would watch a change made half a second ago vanish even though
+      // we still expect it to land.
+      displayRef.current = kept.reduce(
+        (state, item) => applyIntent(state, item.intent, item.sentAt),
+        confirmedRef.current,
+      )
+      setState(displayRef.current)
       setWarning('Lost contact with the host — that change did not stick.')
     }, 500)
 

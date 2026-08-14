@@ -36,7 +36,15 @@ export function loadIframeApi(): Promise<typeof YT> {
     const script = document.createElement('script')
     script.src = SCRIPT_SRC
     script.async = true
-    script.onerror = () => reject(new Error('Failed to load the YouTube IFrame API'))
+    script.onerror = () => {
+      // Remove the dead node before rejecting. The guard above skips injection
+      // whenever a matching script already exists, so leaving a failed node
+      // attached makes every retry return early without appending — and the
+      // retry's promise then never settles, hanging the player with no error,
+      // no timeout, and no recovery short of a full page reload.
+      script.remove()
+      reject(new Error('Failed to load the YouTube IFrame API'))
+    }
     document.head.appendChild(script)
   })
 

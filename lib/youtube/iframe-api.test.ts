@@ -34,11 +34,24 @@ describe('loadIframeApi', () => {
     await expect(promise).resolves.toBe(stub)
   })
 
-  it('allows a retry after the script fails to load', async () => {
+  it('retries cleanly after the script fails to load', async () => {
     const promise = loadIframeApi()
     const script = document.querySelector('script[src*="iframe_api"]') as HTMLScriptElement
     script.onerror?.(new Event('error'))
     await expect(promise).rejects.toThrow(/Failed to load/)
-    expect(loadIframeApi()).not.toBe(promise)
+
+    // The dead node must be gone. If it lingers, the retry's injection guard
+    // matches it, skips appending, and the second promise never settles —
+    // asserting only that the promises differ would not catch that.
+    expect(document.querySelectorAll('script[src*="iframe_api"]')).toHaveLength(0)
+
+    const retry = loadIframeApi()
+    expect(retry).not.toBe(promise)
+    expect(document.querySelectorAll('script[src*="iframe_api"]')).toHaveLength(1)
+
+    const stub = {Player: function () {}}
+    ;(window as {YT?: unknown}).YT = stub
+    window.onYouTubeIframeAPIReady?.()
+    await expect(retry).resolves.toBe(stub)
   })
 })

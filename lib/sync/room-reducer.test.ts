@@ -140,6 +140,23 @@ describe('applyIntent', () => {
     expect(next.currentTrackId).toBe('b')
   })
 
+  it('stops playback when the only track is marked unplayable', () => {
+    const next = applyIntent(
+      withQueue(['a'], 'a'),
+      {type: 'unplayable', trackId: 'a', reason: 'embed-blocked'},
+      9000,
+    )
+    expect(next.queue[0].unplayable).toBe('embed-blocked')
+    expect(next.isPlaying).toBe(false)
+  })
+
+  it('skips over already-unplayable tracks instead of looping', () => {
+    let state = withQueue(['a', 'b', 'c'], 'a')
+    state = applyIntent(state, {type: 'unplayable', trackId: 'b', reason: 'embed-blocked'}, 9000)
+    const next = applyIntent(state, {type: 'unplayable', trackId: 'a', reason: 'embed-blocked'}, 9500)
+    expect(next.currentTrackId).toBe('c')
+  })
+
   it('ignores intents referencing unknown tracks', () => {
     const base = withQueue(['a'], 'a')
     expect(applyIntent(base, {type: 'remove', trackId: 'ghost'}, 9000)).toBe(base)

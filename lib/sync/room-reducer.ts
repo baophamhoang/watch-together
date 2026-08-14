@@ -18,6 +18,17 @@ function nextTrackId(queue: Track[], currentId: string | null): string | null {
   return queue[(index + 1) % queue.length].id
 }
 
+/** Next track not already known-unplayable, or null when none remain. */
+function nextPlayableTrackId(queue: Track[], currentId: string | null): string | null {
+  if (queue.length === 0) return null
+  const start = queue.findIndex(t => t.id === currentId)
+  for (let step = 1; step <= queue.length; step++) {
+    const candidate = queue[(start + step) % queue.length]
+    if (!candidate.unplayable) return candidate.id
+  }
+  return null
+}
+
 function startTrack(state: RoomState, trackId: string | null, now: number): RoomState {
   const track = state.queue.find(t => t.id === trackId)
   return {
@@ -91,9 +102,13 @@ export function applyIntent(state: RoomState, intent: Intent, now: number): Room
       const queue = state.queue.map(t =>
         t.id === intent.trackId ? {...t, unplayable: intent.reason} : t)
       const marked = {...state, queue}
-      return bump(intent.trackId === state.currentTrackId
-        ? startTrack(marked, nextTrackId(queue, state.currentTrackId), now)
-        : marked)
+      if (intent.trackId !== state.currentTrackId) return bump(marked)
+      const next = nextPlayableTrackId(queue, state.currentTrackId)
+      // Nothing left that can play. Stop, rather than restarting a track we
+      // already know errors — the player would fail again, send another
+      // `unplayable`, and spin, re-broadcasting state to every peer each pass.
+      if (next === null) return bump({...marked, isPlaying: false})
+      return bump(startTrack(marked, next, now))
     }
   }
 }

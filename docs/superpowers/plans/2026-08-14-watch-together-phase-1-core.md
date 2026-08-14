@@ -1355,12 +1355,25 @@ describe('loadIframeApi', () => {
     await expect(promise).resolves.toBe(stub)
   })
 
-  it('allows a retry after the script fails to load', async () => {
+  it('retries cleanly after the script fails to load', async () => {
     const promise = loadIframeApi()
     const script = document.querySelector('script[src*="iframe_api"]') as HTMLScriptElement
     script.onerror?.(new Event('error'))
     await expect(promise).rejects.toThrow(/Failed to load/)
-    expect(loadIframeApi()).not.toBe(promise)
+
+    // The dead node must be gone. If it lingers, the retry's injection guard
+    // matches it, skips appending, and the second promise never settles —
+    // asserting only that the promises differ would not catch that.
+    expect(document.querySelectorAll('script[src*="iframe_api"]')).toHaveLength(0)
+
+    const retry = loadIframeApi()
+    expect(retry).not.toBe(promise)
+    expect(document.querySelectorAll('script[src*="iframe_api"]')).toHaveLength(1)
+
+    const stub = {Player: function () {}}
+    ;(window as {YT?: unknown}).YT = stub
+    window.onYouTubeIframeAPIReady?.()
+    await expect(retry).resolves.toBe(stub)
   })
 })
 ```
@@ -1413,7 +1426,15 @@ export function loadIframeApi(): Promise<typeof YT> {
     const script = document.createElement('script')
     script.src = SCRIPT_SRC
     script.async = true
-    script.onerror = () => reject(new Error('Failed to load the YouTube IFrame API'))
+    script.onerror = () => {
+      // Remove the dead node before rejecting. The guard above skips injection
+      // whenever a matching script already exists, so leaving a failed node
+      // attached makes every retry return early without appending — and the
+      // retry's promise then never settles, hanging the player with no error,
+      // no timeout, and no recovery short of a full page reload.
+      script.remove()
+      reject(new Error('Failed to load the YouTube IFrame API'))
+    }
     document.head.appendChild(script)
   })
 
@@ -1438,7 +1459,7 @@ Create `lib/youtube/use-player.ts`. There are no unit tests for this file — js
 ```ts
 'use client'
 
-import {useCallback, useEffect, useRef, useState} from 'react'
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import type {Unplayable} from '@/lib/sync/types'
 import {loadIframeApi} from './iframe-api'
 
@@ -1466,6 +1487,7 @@ export function useYouTubePlayer(events: PlayerEvents) {
   const suppressUntil = useRef(0)
   const eventsRef = useRef(events)
   const [ready, setReady] = useState(false)
+  const [loadError, setLoadError] = useState<Error | null>(null)
 
   // Written in an effect, not during render: assigning to a ref while
   // rendering trips react-hooks/refs and misbehaves under concurrent
@@ -1482,45 +1504,51 @@ export function useYouTubePlayer(events: PlayerEvents) {
     let cancelled = false
     let player: YT.Player | null = null
 
-    loadIframeApi().then(YT => {
-      if (cancelled || !containerRef.current) return
+    loadIframeApi()
+      .then(YT => {
+        if (cancelled || !containerRef.current) return
 
-      player = new YT.Player(containerRef.current, {
-        playerVars: {playsinline: 1, rel: 0, modestbranding: 1},
-        events: {
-          onReady: () => {
-            if (!cancelled) setReady(true)
+        player = new YT.Player(containerRef.current, {
+          playerVars: {playsinline: 1, rel: 0, modestbranding: 1},
+          events: {
+            onReady: () => {
+              if (!cancelled) setReady(true)
+            },
+            onStateChange: event => {
+              // The end of a video is never an echo of something we did, so it
+              // is checked BEFORE the suppression gate. If it were suppressed,
+              // a drift correction landing within the window of the final
+              // second would swallow it and the queue would stall at the end
+              // of the video with no way forward but a manual skip. Duplicate
+              // `ended` reports are harmless: the reducer only advances while
+              // the track id still matches, so the second one is a no-op.
+              if (event.data === YT.PlayerState.ENDED) {
+                eventsRef.current.onEnded()
+                return
+              }
+              // Play and pause DO echo: a move we made ourselves is not a user
+              // action, and broadcasting it would bounce between peers forever.
+              if (Date.now() < suppressUntil.current) return
+              if (event.data === YT.PlayerState.PLAYING) {
+                eventsRef.current.onUserPlay()
+              } else if (event.data === YT.PlayerState.PAUSED) {
+                eventsRef.current.onUserPause(event.target.getCurrentTime())
+              }
+            },
+            onError: event => {
+              const reason: Unplayable =
+                event.data === 101 || event.data === 150 ? 'embed-blocked' : 'not-found'
+              eventsRef.current.onUnplayable(reason)
+            },
           },
-          onStateChange: event => {
-            // The end of a video is never an echo of something we did, so it
-            // is checked BEFORE the suppression gate. If it were suppressed, a
-            // drift correction landing within the window of the final second
-            // would swallow it and the queue would stall at the end of the
-            // video with no way forward but a manual skip. Duplicate `ended`
-            // reports are harmless: the reducer only advances while the track
-            // id still matches, so the second one is a no-op.
-            if (event.data === YT.PlayerState.ENDED) {
-              eventsRef.current.onEnded()
-              return
-            }
-            // Play and pause DO echo: a move we made ourselves is not a user
-            // action, and broadcasting it would bounce between peers forever.
-            if (Date.now() < suppressUntil.current) return
-            if (event.data === YT.PlayerState.PLAYING) {
-              eventsRef.current.onUserPlay()
-            } else if (event.data === YT.PlayerState.PAUSED) {
-              eventsRef.current.onUserPause(event.target.getCurrentTime())
-            }
-          },
-          onError: event => {
-            const reason: Unplayable =
-              event.data === 101 || event.data === 150 ? 'embed-blocked' : 'not-found'
-            eventsRef.current.onUnplayable(reason)
-          },
-        },
+        })
+        playerRef.current = player
       })
-      playerRef.current = player
-    })
+      .catch((error: Error) => {
+        // Without this the rejection is unhandled, and `ready` stays false
+        // forever with nothing on screen explaining why no player appeared.
+        if (!cancelled) setLoadError(error)
+      })
 
     return () => {
       cancelled = true
@@ -1533,31 +1561,40 @@ export function useYouTubePlayer(events: PlayerEvents) {
     }
   }, [])
 
-  const handle: PlayerHandle | null = ready
-    ? {
-        load(videoId, startAtSec) {
-          suppress()
-          playerRef.current?.loadVideoById({videoId, startSeconds: startAtSec})
-        },
-        play() {
-          suppress()
-          playerRef.current?.playVideo()
-        },
-        pause() {
-          suppress()
-          playerRef.current?.pauseVideo()
-        },
-        seekTo(seconds) {
-          suppress()
-          playerRef.current?.seekTo(seconds, true)
-        },
-        getCurrentTime() {
-          return playerRef.current?.getCurrentTime() ?? 0
-        },
-      }
-    : null
+  // Memoized on `ready` alone. Every method closes over `playerRef` (a ref)
+  // and `suppress` (stable via useCallback), so nothing else can change it.
+  // Task 12 puts `handle` in a dependency array — a fresh object each render
+  // would re-fire that effect on every parent render, tearing down and
+  // rebuilding the drift-correction interval each time.
+  const handle: PlayerHandle | null = useMemo(
+    () =>
+      ready
+        ? {
+            load(videoId, startAtSec) {
+              suppress()
+              playerRef.current?.loadVideoById({videoId, startSeconds: startAtSec})
+            },
+            play() {
+              suppress()
+              playerRef.current?.playVideo()
+            },
+            pause() {
+              suppress()
+              playerRef.current?.pauseVideo()
+            },
+            seekTo(seconds) {
+              suppress()
+              playerRef.current?.seekTo(seconds, true)
+            },
+            getCurrentTime() {
+              return playerRef.current?.getCurrentTime() ?? 0
+            },
+          }
+        : null,
+    [ready, suppress],
+  )
 
-  return {containerRef, handle, ready}
+  return {containerRef, handle, ready, loadError}
 }
 ```
 
@@ -2971,7 +3008,7 @@ export function Room({code}: {code: string}) {
     setLocalBlock(null)
   }, [room.state.currentTrackId])
 
-  const {containerRef, handle} = useYouTubePlayer({
+  const {containerRef, handle, loadError} = useYouTubePlayer({
     onEnded,
     onUnplayable,
     onUserPlay,
@@ -3007,6 +3044,14 @@ export function Room({code}: {code: string}) {
       <section className="flex-1">
         <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black">
           <div ref={containerRef} className="h-full w-full" />
+          {loadError && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/85 p-6 text-center">
+              <p className="text-sm text-neutral-300">
+                Could not load the YouTube player. An ad or privacy blocker may be
+                stopping it. Reload the page to try again.
+              </p>
+            </div>
+          )}
           {localBlock && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/85 p-6 text-center">
               <p className="text-sm text-neutral-300">

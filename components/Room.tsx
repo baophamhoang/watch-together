@@ -179,6 +179,12 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
               the unplayable overlay and swallow its "Skip for everyone" button. */}
           {!activated && !loadError && !localBlock && (
             <TapToWatch
+              // This closure must NOT be memoized. `handle` comes from a
+              // useMemo keyed on the player's readiness, so the `if (!handle)`
+              // guard below is correct only because an inline closure is
+              // rebuilt when readiness flips. A useCallback here would capture
+              // the null handle forever and turn "strands the user" into "gate
+              // permanently stuck" — the same bug wearing the fix's clothes.
               onActivate={() => {
                 // A tap before the IFrame API has finished loading must not dismiss
                 // the gate. `handle` is null across a real network round trip, and
@@ -196,6 +202,19 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
                 // gesture — that activation is exactly what the autoplay policy
                 // requires, and it does not survive an async hop.
                 handle.play()
+                // Play-then-pause, not a conditional play: the play() above is
+                // what spends the gesture and unlocks autoplay, so it has to
+                // happen even when the room is paused. Without the pause, a
+                // guest joining a paused room starts playing alone and never
+                // recovers — useSyncPlayback's effect re-runs only on
+                // [handle, current?.id, state.isPlaying], none of which change,
+                // and decideCorrection has no pause rung, so they settle into a
+                // seek-back/play-forward cycle with audio. pause() also re-arms
+                // use-player's suppression window, so a PLAYING event that
+                // lands late on a slow connection cannot fire onUserPlay and
+                // un-pause the video for everyone. Both calls stay synchronous:
+                // an await or a timer here would leave the gesture behind.
+                if (!room.state.isPlaying) handle.pause()
               }}
             />
           )}

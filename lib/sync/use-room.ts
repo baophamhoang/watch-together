@@ -4,6 +4,7 @@ import {type RefObject, useEffect, useRef, useState} from 'react'
 import {joinRoom, selfId} from 'trystero'
 import {appendMessage} from '@/lib/chat/messages'
 import type {ChatKind, ChatMessage} from '@/lib/chat/types'
+import {DEFAULT_NICKNAME, MAX_NICKNAME_LENGTH} from '@/lib/identity'
 import {bestOffset, makeSample, pushSample, type ClockSample} from './clock'
 import {APP_ID, BEAT_INTERVAL_MS, CLOCK_BURST_SAMPLES, CLOCK_RESAMPLE_MS, HOST_CLAIM_MS} from './constants'
 import {electHost, resolveHostTie} from './election'
@@ -46,6 +47,19 @@ export function useRoom(
   const nextJoinOrderRef = useRef(1)
   const sendRef = useRef<(intent: Intent) => void>(() => {})
   const sendChatRef = useRef<(kind: ChatKind, body: string) => void>(() => {})
+  const announceNameRef = useRef<(name: string) => void>(() => {})
+
+  // The join effect below runs only when `code` changes, so every `name` its
+  // long-lived closures read would otherwise be the value at mount — which is
+  // the DEFAULT, because Room hydrates the real nickname from localStorage in a
+  // mount effect that lands in the same passive-effect flush. Mirroring it into
+  // a ref (the `isHostRef` pattern) keeps those closures current without
+  // putting `name` in the dep array, which would tear down and rebuild the whole
+  // WebRTC room on every keystroke of a rename.
+  const nameStateRef = useRef(name)
+  useEffect(() => {
+    nameStateRef.current = name
+  })
 
   useEffect(() => {
     const room = joinRoom({appId: APP_ID}, code, {
@@ -64,6 +78,13 @@ export function useRoom(
     const stateAction = room.makeAction<RoomState>('state')
     const intentAction = room.makeAction<Intent>('intent')
     const chatAction = room.makeAction<ChatMessage>('chat')
+    // The spec's `hello` action, narrowed to the one thing it was ever needed
+    // for here: a peer's claimed nickname. Nothing else in `hello`'s payload has
+    // an owner other than the host, and the host already seeds state and roster
+    // directly in `onPeerJoin`. Without this, `nameRef` below could only ever
+    // hold the placeholder, so every avatar, toast and chat line in the room
+    // read "friend" no matter what anyone typed on the landing page.
+    const nameAction = room.makeAction<string>('name')
 
     /** Last state issued by the host. The only basis for version comparison. */
     const confirmedRef = {current: emptyRoomState()}
@@ -120,16 +141,36 @@ export function useRoom(
 
     const publishRoster = () => {
       const entries: RosterEntry[] = [
-        {peerId: selfId, name, joinOrder: 0},
+        {peerId: selfId, name: nameStateRef.current, joinOrder: 0},
         ...[...joinOrderRef.current.entries()].map(([peerId, joinOrder]) => ({
           peerId,
-          name: nameRef.get(peerId) ?? 'friend',
+          name: nameRef.get(peerId) ?? DEFAULT_NICKNAME,
           joinOrder,
         })),
       ]
       rosterRef.current = entries
       setRoster(entries)
       fire(rosterAction.send(entries))
+    }
+
+    nameAction.onMessage = (incoming, {peerId}) => {
+      // Same trust boundary as chat: the `string` type parameter is a claim, not
+      // a guarantee. Clamp it to the shape a local nickname already takes, and
+      // fall back rather than coercing — String({}) would put the literal text
+      // "[object Object]" on an avatar.
+      const claimed =
+        typeof incoming === 'string' ? incoming.trim().slice(0, MAX_NICKNAME_LENGTH) : ''
+      nameRef.set(peerId, claimed || DEFAULT_NICKNAME)
+      // Only the host publishes the roster, so only the host has anything to do
+      // here — every guest learns the new name from the roster that follows.
+      if (isHostRef.current) publishRoster()
+    }
+
+    announceNameRef.current = (next: string) => {
+      fire(nameAction.send(next))
+      // Our own roster entry comes from `nameStateRef`, not from `nameRef`, so a
+      // rename by the host has to republish to be seen by anyone, including us.
+      if (isHostRef.current) publishRoster()
     }
 
     const hostIdRef = {current: null as string | null}
@@ -251,7 +292,10 @@ export function useRoom(
     }
 
     room.onPeerJoin = peerId => {
-      nameRef.set(peerId, 'friend')
+      // A placeholder only until their `name` message lands. Guarded rather than
+      // assigned, so a name that somehow arrived first is not overwritten with
+      // the default by an `onPeerJoin` that fired late.
+      if (!nameRef.has(peerId)) nameRef.set(peerId, DEFAULT_NICKNAME)
       // Recorded for EVERY peer, not only while we are host. `onPeerJoin` fires
       // once per peer and never again, so when two tabs connect before either has
       // claimed the room — the ordinary case when a link is shared — a host-gated
@@ -275,6 +319,11 @@ export function useRoom(
         // who are already caught up.
         fire(stateAction.send(confirmedRef.current, {target: peerId}))
       }
+      // Sent by every peer, host or not, and AFTER the host block above so the
+      // beat-before-roster/state ordering that block documents is untouched.
+      // Targeted, because everyone already here knows our name. The host will
+      // fold the reply into the roster it publishes next.
+      fire(nameAction.send(nameStateRef.current, {target: peerId}))
       setStatus('connected')
     }
 
@@ -324,7 +373,7 @@ export function useRoom(
       const message: ChatMessage = {
         id: crypto.randomUUID(),
         peerId: selfId,
-        name,
+        name: nameStateRef.current,
         kind,
         body: trimmed,
         at: Date.now(),
@@ -362,6 +411,15 @@ export function useRoom(
     // Reconnect only when the room identity changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code])
+
+  // Broadcasts the nickname, separately from the join effect so a rename costs a
+  // single message rather than a full reconnect. The first run fires with the
+  // default and reaches nobody — no peer is connected yet — which is why
+  // `onPeerJoin` also sends it targeted; between them, both the peer who arrives
+  // first and the peer who arrives second learn the other's name.
+  useEffect(() => {
+    announceNameRef.current(name)
+  }, [name])
 
   return {
     state,

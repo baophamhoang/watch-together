@@ -1682,7 +1682,15 @@ export async function probeDuration(
         onReady: event => {
           const first = read(event.target)
           if (first !== null) return finish(first)
-          setTimeout(() => finish(read(event.target)), RETRY_DELAY_MS)
+          setTimeout(() => {
+            // The timeout backstop may have fired in this gap and destroyed the
+            // player already. Reading from a destroyed player throws, and this
+            // is a timer callback, so nothing would catch it — just a stray
+            // console error muddying the browser-driven checks later. The probe
+            // is settled either way, so there is nothing left to do.
+            if (settled) return
+            finish(read(event.target))
+          }, RETRY_DELAY_MS)
         },
         onError: () => finish(null),
       },

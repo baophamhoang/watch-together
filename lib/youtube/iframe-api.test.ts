@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import {afterEach, describe, expect, it} from 'vitest'
+import {afterEach, describe, expect, it, vi} from 'vitest'
 import {loadIframeApi, resetIframeApiLoaderForTests} from './iframe-api'
 
 afterEach(() => {
@@ -49,6 +49,27 @@ describe('loadIframeApi', () => {
     expect(retry).not.toBe(promise)
     expect(document.querySelectorAll('script[src*="iframe_api"]')).toHaveLength(1)
 
+    const stub = {Player: function () {}}
+    ;(window as {YT?: unknown}).YT = stub
+    window.onYouTubeIframeAPIReady?.()
+    await expect(retry).resolves.toBe(stub)
+  })
+
+  it('rejects with a distinct message if the ready callback never fires', async () => {
+    vi.useFakeTimers()
+    try {
+      const promise = loadIframeApi()
+      const assertion = expect(promise).rejects.toThrow(/Timed out/)
+      // onerror never firing (a filtered response, an extension neutering the
+      // script) must not hang the promise forever the way it did before.
+      await vi.advanceTimersByTimeAsync(10_000)
+      await assertion
+    } finally {
+      vi.useRealTimers()
+    }
+
+    // Retrying after a timeout must work exactly like retrying after onerror.
+    const retry = loadIframeApi()
     const stub = {Player: function () {}}
     ;(window as {YT?: unknown}).YT = stub
     window.onYouTubeIframeAPIReady?.()

@@ -3149,10 +3149,16 @@ export function Room({code}: {code: string}) {
 
   const {resyncing, current} = useSyncPlayback(room, handle)
 
-  // Dev-only probe. The YouTube iframe is cross-origin, so this is the only way
-  // an automated check can read what each peer is actually playing.
+  // Probe for automated verification. The YouTube iframe is cross-origin, so
+  // this is the only way a check can read what each peer is actually playing.
+  //
+  // Deliberately NOT guarded on `process.env.NODE_ENV`. Next inlines that value
+  // into the client bundle at build time, and every browser check in this plan
+  // runs against `npm run build && npm run start` — because dev's Strict Mode
+  // double-invokes effects and races the host election. A production guard
+  // would therefore strip this hook from the exact build that needs it, and
+  // Task 16 could not measure anything at all.
   useEffect(() => {
-    if (process.env.NODE_ENV === 'production') return
     ;(window as unknown as {__watchTogether?: unknown}).__watchTogether = {
       readAt: () => ({
         at: Date.now(),

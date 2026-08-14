@@ -1628,6 +1628,38 @@ Verify at 390px that the rail fills everything below the now-playing bar with
 no black gap, and at `lg` that the player still grows and the rail holds its
 380px.
 
+Stacking is wrong in landscape, though, and fixing only the portrait case
+leaves the sibling failure: at 844×390 the `aspect-video` player is taller than
+the entire viewport, so the section eats everything and `min-h-0` lets the rail
+go to **0px** — chat and queue vanish outright. Width is the wrong
+discriminator here (a landscape phone is 844px wide, just under `lg`, while a
+portrait tablet is 768px wide and genuinely wants stacking); the real question
+is whether there is vertical room to stack, which is what `landscape:`
+expresses. Add it alongside every `lg:` in the layout chain:
+
+```tsx
+<main className="flex h-dvh flex-col landscape:flex-row lg:flex-row">
+```
+
+```tsx
+<div className="yt-player-shell relative aspect-video w-full shrink-0 bg-black landscape:aspect-auto landscape:flex-1 lg:aspect-auto lg:flex-1" />
+```
+
+```tsx
+<section className="flex min-w-0 flex-col landscape:flex-1 lg:flex-1">
+```
+
+```tsx
+<aside className="flex min-h-0 w-full flex-1 flex-col border-border landscape:w-[380px] landscape:flex-none landscape:border-l lg:w-[380px] lg:flex-none lg:border-l">
+```
+
+At 844×390 that gives a 464px-wide player at 261px tall inside 390px of height,
+with the rail at its full 380px — cramped but complete. Desktop is unaffected:
+it is already landscape *and* `lg`, so both variants agree.
+
+Verify at 844×390 that the rail is present and non-zero, and re-check 390×844
+afterwards to confirm the portrait case did not regress.
+
 - [ ] **Step 1: Rebuild the queue rows**
 
 In `components/Queue.tsx`: replace the `×` with Lucide's `Trash2` in a 44px target, use tokens throughout, mark the playing row with the accent rather than a grey wash, and give the empty state something useful to say.
@@ -1720,6 +1752,19 @@ Run:
 grep -rnE "(bg|text|border|ring|shadow|fill|stroke|divide|from|to|via|placeholder|accent|caret|outline|decoration)-(neutral|slate|gray|zinc|stone)-|rounded-(sm|md|lg|xl|2xl|3xl|full)\b|(bg|text|border|shadow|ring)-(black|white)/" components/ app/ --include="*.tsx"
 ```
 
+Then the spacing sweep, which is a separate pattern because spacing and colour
+fail differently — a raw colour is wrong, a raw gap is merely unanchored:
+
+```bash
+grep -rnE "(^|[\"' ])-?(m|p)[trblxyse]?-[0-9]|(^|[\"' ])(gap|space)(-[xy])?-[0-9]" components/ app/ --include="*.tsx"
+```
+
+Expected: no output, with the single documented exemption below. This pattern
+deliberately keys on a leading quote or space so it matches utility names and
+not fragments: `inset-0`, `right-0`, `left-1/2`, `max-w-md`, `min-w-0`,
+`max-h-48` and the already-correct `-space-x-[var(--space-2)]` all pass it
+untouched.
+
 Expected: no output. Anything listed is a leftover to convert.
 
 Three things about that command, each of which cost a run to find:
@@ -1738,13 +1783,29 @@ Run `npm run build && npm run start`. With the Chrome MCP tools, open a room and
 
 ```js
 JSON.stringify(
-  [...document.querySelectorAll('button, a')]
-    .filter(el => !el.textContent?.trim() && !el.getAttribute('aria-label'))
+  [...document.querySelectorAll('button, a, input, select, textarea')]
+    .filter(el => {
+      if (el.getAttribute('aria-label') || el.getAttribute('aria-labelledby')) return false
+      // A form control's name can come from a <label>, which has no text of
+      // its own inside the control — checking textContent alone would clear
+      // every input in the app and clear nothing that was actually wrong.
+      if (el.labels?.length) return false
+      return !el.textContent?.trim()
+    })
     .map(el => el.outerHTML.slice(0, 80))
 )
 ```
 
-Expected: `[]` — every icon-only control carries an `aria-label`.
+Expected: `[]` — every control has an accessible name from somewhere.
+
+Two notes on that selector. It covers form controls, not just `button, a`: an
+earlier version queried only the latter and structurally could not see that the
+room-code field's *only* accessible name was its placeholder, so it announced
+as "word-word-abcd, edit text" and lost even that the moment someone typed.
+And run it on more than one screen — at minimum the landing page, an empty
+room, and a room with a track queued. The queue's own remove buttons do not
+exist in an empty room, so a single audit of the default state cannot see the
+control this task added.
 
 Then confirm no horizontal overflow at 320px:
 

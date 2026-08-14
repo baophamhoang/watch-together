@@ -1249,7 +1249,12 @@ export async function GET(request: Request) {
     return Response.json({error: 'youtube unreachable'}, {status: 502})
   }
 
-  if (upstream.status === 404 || upstream.status === 401) {
+  // YouTube answers 400 for a well-formed id with no video behind it, and
+  // 401/404 for private or removed ones. We build this request ourselves and
+  // the id is regex-validated above, so an upstream 400 means "no such video",
+  // never "your request was malformed" — bucketing it as 502 would tell the
+  // user to retry something that will never exist.
+  if ([400, 401, 404].includes(upstream.status)) {
     return Response.json({error: 'video not found or private'}, {status: 404})
   }
   if (!upstream.ok) {
@@ -1274,7 +1279,11 @@ Then run: `curl -s "http://localhost:3000/api/oembed?videoId=dQw4w9WgXcQ"`
 Expected: JSON containing `"title"`, `"author"`, and a `thumbnail` URL on `i.ytimg.com`.
 
 Run: `curl -s -o /dev/null -w "%{http_code}\n" "http://localhost:3000/api/oembed?videoId=bogus"`
-Expected: `400`
+Expected: `400` — rejected by our own validation, never reaching YouTube.
+
+Run: `curl -s -o /dev/null -w "%{http_code}\n" "http://localhost:3000/api/oembed?videoId=aaaaaaaaaaa"`
+Expected: `404` — well-formed id, no such video. This is the case that must not
+surface as 502, or the UI tells the user to retry a video that cannot exist.
 
 - [ ] **Step 7: Commit**
 

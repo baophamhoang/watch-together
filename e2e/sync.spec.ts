@@ -2,9 +2,26 @@ import {expect, test, type Page} from '@playwright/test'
 
 const VIDEO_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
 const SECOND_VIDEO_URL = 'https://www.youtube.com/watch?v=9bZkp7q19f0'
-const ROOM = 'ember-otter-k7qm'
+/**
+ * Creates a fresh room through the real UI and returns its code.
+ *
+ * Never hardcode a room code in this suite. Rooms are discovered over a public
+ * relay network, so a fixed code names a room anyone in the world may already
+ * be sitting in — and the obvious candidate doubles as the join field's
+ * placeholder text, which makes it the single most discoverable room the app
+ * has. A test asserting "2 watching" that fails because a stranger wandered in
+ * is failing for no reason of its own. Creating a room per run also exercises
+ * the create flow, which a fixed code never touches.
+ */
+async function startRoom(page: Page, name: string): Promise<string> {
+  await page.goto('/')
+  await page.getByLabel('Your name').fill(name)
+  await page.getByRole('button', {name: 'Start a room'}).click()
+  await expect(page.getByTestId('room-code')).toBeVisible()
+  return (await page.getByTestId('room-code').innerText()).trim()
+}
 
-async function enterRoom(page: Page, name: string, room: string = ROOM) {
+async function joinRoom(page: Page, name: string, room: string) {
   await page.goto('/')
   await page.getByLabel('Your name').fill(name)
   await page.getByPlaceholder('ember-otter-k7qm').fill(room)
@@ -18,8 +35,8 @@ test('two peers share a queue and converge on the same position', async ({browse
   const host = await hostContext.newPage()
   const guest = await guestContext.newPage()
 
-  await enterRoom(host, 'host')
-  await enterRoom(guest, 'guest')
+  const room = await startRoom(host, 'host')
+  await joinRoom(guest, 'guest', room)
 
   // Both peers must see each other before anything is shared.
   await expect(host.getByTestId('status')).toContainText('2 watching')
@@ -60,8 +77,9 @@ test('two peers share a queue and converge on the same position', async ({browse
 })
 
 test('a malformed link is rejected without touching the queue', async ({page}) => {
-  // Its own room, so nothing from the previous test can bleed in.
-  await enterRoom(page, 'solo', 'quiet-lantern-2b9x')
+  // Its own freshly created room, so neither the previous test nor a stranger
+  // on the relay network can bleed in.
+  await startRoom(page, 'solo')
   await page.getByTestId('add-url').fill('https://vimeo.com/12345')
   await page.getByTestId('add-submit').click()
   await expect(page.getByText('That is not a YouTube link.')).toBeVisible()

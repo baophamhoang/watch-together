@@ -71,10 +71,20 @@ The scaffold's light/dark `:root` blocks and its two `body` rules go. This app i
   --bg: #0b0b0c;
   --surface: #151517;
   --surface-raised: #1e1e21;
+
+  /* Two border roles, and picking the wrong one is an accessibility bug.
+     --border is DECORATIVE: dividers and separators, where the thing either
+     side is already identifiable without it. At 1.3:1 it is intentionally
+     quiet and WCAG 1.4.11 does not apply to it.
+     --border-strong is STRUCTURAL: the boundary of a control you could not
+     otherwise locate — text inputs above all, since --surface on --bg is only
+     1.07:1, so the fill alone does not show you where the field is. Measured
+     3.5:1 against --surface and 3.7:1 against --bg, clearing the 3:1 floor. */
   --border: #2a2a2f;
+  --border-strong: #6b6b73;
 
   /* Text. Contrast measured against --bg:
-     --text 17.1:1, --text-muted 7.6:1, --text-subtle 5.8:1.
+     --text 17.9:1, --text-muted 7.7:1, --text-subtle 5.8:1.
      All clear the 4.5:1 AA floor for body text, so any of the three is
      safe on any surface here. Nothing dimmer than --text-subtle exists,
      deliberately — there is no token available to fail with. */
@@ -104,6 +114,7 @@ The scaffold's light/dark `:root` blocks and its two `body` rules go. This app i
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-text: var(--text);
   --color-muted: var(--text-muted);
   --color-subtle: var(--text-subtle);
@@ -129,7 +140,7 @@ body {
 
 /* Every interactive element gets a visible focus ring. The default outline
    disappears against a dark surface. */
-:where(button, a, input, [tabindex]):focus-visible {
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
   outline: 2px solid var(--live);
   outline-offset: 2px;
 }
@@ -938,7 +949,7 @@ export function ChatComposer({
         placeholder="Message"
         aria-label="Message"
         data-testid="chat-input"
-        className="min-w-0 flex-1 rounded-[var(--radius-md)] bg-surface px-[var(--space-3)] py-[var(--space-2)] text-sm text-text placeholder:text-subtle"
+        className="min-w-0 flex-1 rounded-[var(--radius-md)] border border-border-strong bg-surface px-[var(--space-3)] py-[var(--space-2)] text-sm text-text placeholder:text-subtle"
       />
       {gifSlot}
       <button
@@ -1331,7 +1342,7 @@ export function GifPicker({onPick}: {onPick(url: string): void}) {
             onChange={e => setQuery(e.target.value)}
             placeholder="Search GIFs"
             aria-label="Search GIFs"
-            className="w-full rounded-[var(--radius-md)] bg-surface-raised px-[var(--space-3)] py-[var(--space-2)] text-sm text-text placeholder:text-subtle"
+            className="w-full rounded-[var(--radius-md)] border border-border-strong bg-surface-raised px-[var(--space-3)] py-[var(--space-2)] text-sm text-text placeholder:text-subtle"
           />
 
           {error && <p className="p-[var(--space-2)] text-sm text-warn">{error}</p>}
@@ -1543,7 +1554,9 @@ Row:
 
 - [ ] **Step 2: Restyle the add form and the landing page**
 
-In `AddTrackForm.tsx` and `app/page.tsx`, replace every `rounded-lg`, `border-neutral-*`, `bg-neutral-*` and `text-neutral-*` with the token equivalents (`rounded-[var(--radius-md)]`, `border-border`, `bg-surface`, `text-text` / `text-muted`). Error text uses `text-danger`. Keep every `data-testid`, the label text "Your name", the button labels "Start a room" and "Join", and the placeholder `word-word-abcd` — the e2e suite resolves elements by all of them.
+In `AddTrackForm.tsx` and `app/page.tsx`, replace every `rounded-lg`, `border-neutral-*`, `bg-neutral-*` and `text-neutral-*` with the token equivalents (`rounded-[var(--radius-md)]`, `border-border`, `bg-surface`, `text-text` / `text-muted`). Error text uses `text-danger`.
+
+**Every text input takes `border border-border-strong`, not `border-border`.** `--surface` against `--bg` is only 1.07:1, so a filled field with a decorative border is effectively invisible — the strong border is the only thing that shows someone where to type, and it is the token measured to clear the 3:1 boundary floor. That applies to the nickname field, the room-code field, and the add-URL field. Keep every `data-testid`, the label text "Your name", the button labels "Start a room" and "Join", and the placeholder `word-word-abcd` — the e2e suite resolves elements by all of them.
 
 - [ ] **Step 3: Check for token violations**
 

@@ -1,8 +1,10 @@
 'use client'
 
 import {useCallback, useEffect, useRef, useState} from 'react'
+import {SkipForward} from 'lucide-react'
 import {AddTrackForm} from './AddTrackForm'
 import {Queue} from './Queue'
+import {RoomTabs} from './RoomTabs'
 import {loadNickname} from '@/lib/identity'
 import type {Track, Unplayable} from '@/lib/sync/types'
 import {useRoom} from '@/lib/sync/use-room'
@@ -106,60 +108,69 @@ export function Room({code}: {code: string}) {
   const add = (track: Track) => room.send({type: 'enqueue', track})
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-6xl flex-col gap-4 p-4 lg:flex-row">
-      <section className="flex-1">
-        <div className="yt-player-shell relative aspect-video w-full overflow-hidden rounded-xl bg-black">
+    <main className="flex h-dvh flex-col lg:flex-row">
+      {/* The video is the protagonist: it takes every pixel the rail does not. */}
+      <section className="flex min-w-0 flex-1 flex-col">
+        <div className="yt-player-shell relative aspect-video w-full shrink-0 bg-black lg:aspect-auto lg:flex-1">
           <div ref={containerRef} className="h-full w-full" />
+
           {loadError && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/85 p-6 text-center">
-              <p className="text-sm text-neutral-300">
-                Could not load the YouTube player. An ad or privacy blocker may be
-                stopping it. Reload the page to try again.
-              </p>
-            </div>
+            <PlayerOverlay>
+              Could not load the YouTube player. An ad or privacy blocker may be
+              stopping it. Reload the page to try again.
+            </PlayerOverlay>
           )}
+
           {localBlock && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/85 p-6 text-center">
-              <p className="text-sm text-neutral-300">
-                {localBlock === 'embed-blocked'
-                  ? "This video can't be played here — it may be blocked in your region."
-                  : 'This video is unavailable for you.'}
-              </p>
-              <button
-                onClick={() => {
+            <PlayerOverlay
+              action={{
+                label: 'Skip for everyone',
+                onClick: () => {
                   const trackId = trackIdRef.current
                   if (trackId) room.send({type: 'unplayable', trackId, reason: localBlock})
-                }}
-                className="rounded-lg border border-neutral-600 px-3 py-1.5 text-sm hover:border-neutral-400"
-              >
-                Skip for everyone
-              </button>
-            </div>
+                },
+              }}
+            >
+              {localBlock === 'embed-blocked'
+                ? "This video can't be played here — it may be blocked in your region."
+                : 'This video is unavailable for you.'}
+            </PlayerOverlay>
           )}
         </div>
 
-        <div className="mt-3 flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-[var(--space-3)] border-t border-border px-[var(--space-3)] py-[var(--space-2)]">
           <button
             onClick={() => room.send({type: 'skip'})}
             disabled={room.state.queue.length === 0}
             data-testid="skip"
-            className="rounded-lg border border-neutral-700 px-3 py-1.5 text-sm hover:border-neutral-500 disabled:opacity-40"
+            aria-label="Skip to next track"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius-md)] text-text hover:bg-surface-raised disabled:text-subtle disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed"
           >
-            Skip
+            <SkipForward size={18} aria-hidden />
           </button>
-          <p className="truncate text-sm text-neutral-400" data-testid="now-playing">
+          <p className="min-w-0 flex-1 truncate text-sm text-text" data-testid="now-playing">
             {current ? current.title : 'Nothing playing'}
           </p>
-          {resyncing && <span className="text-xs text-amber-400">resyncing…</span>}
+          {resyncing && <span className="shrink-0 text-xs text-warn">resyncing…</span>}
         </div>
       </section>
 
-      <aside className="flex w-full flex-col gap-4 lg:w-96">
-        <div className="flex items-center justify-between text-sm">
-          <code className="rounded bg-neutral-900 px-2 py-1" data-testid="room-code">
+      <aside className="flex min-h-0 w-full flex-col border-border lg:w-[380px] lg:shrink-0 lg:border-l">
+        {/* Room code + presence status: not part of this task's brief, but the
+            current build has them and they're load-bearing for the e2e suite
+            (startRoom() waits on data-testid="room-code" before anything else
+            runs). Kept per the dispatch's "keep it and say so" instruction —
+            re-skinned onto Task 1 tokens since the raw Tailwind colours they
+            used are gone. Presence/invite are real tasks later in this plan;
+            this is only carrying forward what already existed. */}
+        <div className="flex shrink-0 items-center justify-between gap-[var(--space-2)] border-b border-border px-[var(--space-3)] py-[var(--space-2)] text-sm">
+          <code
+            className="rounded-[var(--radius-sm)] bg-surface-raised px-[var(--space-2)] py-[var(--space-1)] text-text"
+            data-testid="room-code"
+          >
             {code}
           </code>
-          <span className="text-neutral-500" data-testid="status">
+          <span className="text-muted" data-testid="status">
             {room.status === 'connected'
               ? `${room.roster.length} watching${room.isHost ? ' · host' : ''}`
               : room.status === 'blocked'
@@ -169,14 +180,51 @@ export function Room({code}: {code: string}) {
         </div>
 
         {room.warning && (
-          <p className="rounded-lg bg-amber-950/60 px-3 py-2 text-sm text-amber-300">
+          <p className="shrink-0 border-b border-border px-[var(--space-3)] py-[var(--space-2)] text-sm text-warn">
             {room.warning}
           </p>
         )}
 
-        <AddTrackForm onAdd={add} addedBy={{peerId: room.selfId, name}} />
-        <Queue state={room.state} onRemove={id => room.send({type: 'remove', trackId: id})} />
+        <RoomTabs
+          unreadCount={0}
+          queue={
+            <div className="flex flex-col gap-[var(--space-3)] p-[var(--space-3)]">
+              <AddTrackForm onAdd={add} addedBy={{peerId: room.selfId, name}} />
+              <Queue
+                state={room.state}
+                onRemove={id => room.send({type: 'remove', trackId: id})}
+              />
+            </div>
+          }
+          chat={
+            <p className="p-[var(--space-3)] text-sm text-muted">
+              Chat arrives in the next task.
+            </p>
+          }
+        />
       </aside>
     </main>
+  )
+}
+
+function PlayerOverlay({
+  children,
+  action,
+}: {
+  children: React.ReactNode
+  action?: {label: string; onClick(): void}
+}) {
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-[var(--space-3)] bg-black/85 p-[var(--space-4)] text-center">
+      <p className="max-w-sm text-sm text-text">{children}</p>
+      {action && (
+        <button
+          onClick={action.onClick}
+          className="rounded-[var(--radius-md)] border border-border px-[var(--space-3)] py-[var(--space-2)] text-sm text-text hover:bg-surface-raised cursor-pointer"
+        >
+          {action.label}
+        </button>
+      )}
+    </div>
   )
 }

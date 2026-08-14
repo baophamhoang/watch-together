@@ -2064,7 +2064,10 @@ describe('expirePending', () => {
   })
 
   it('keeps everything when nothing has timed out', () => {
-    expect(expirePending(pending, 4100, 2000).expired).toHaveLength(0)
+    // 2500, not 4100: the fixture's first intent was sent at 1000, so at 4100
+    // it is 3100ms old and already past a 2000ms timeout. The assertion would
+    // be unsatisfiable.
+    expect(expirePending(pending, 2500, 2000).expired).toHaveLength(0)
   })
 
   it('handles an empty list', () => {
@@ -2216,7 +2219,27 @@ clearInterval(pendingTimer)
 
 Replace every remaining reference to the old `stateRef` in this file with `confirmedRef` — specifically in `promote()` and in the `onPeerJoin` hand-off.
 
-Replace the `promote()` body so a new host seeds peers from its replica:
+Finally, extend `demote()` to reset the replication refs alongside React state:
+
+```ts
+const demote = () => {
+  isHostRef.current = false
+  setIsHost(false)
+  // `joinOrderRef` is deliberately NOT cleared — see Task 10.
+  // The replication refs, by contrast, MUST be reset. `shouldAcceptState`
+  // compares incoming state against `confirmedRef`, so a peer that briefly
+  // held the room and applied even one intent keeps a version high enough to
+  // reject the winner's authoritative state — and stays permanently diverged.
+  // That is precisely the failure the confirmed/display split exists to
+  // prevent, arriving through the back door.
+  confirmedRef.current = emptyRoomState()
+  displayRef.current = emptyRoomState()
+  pendingRef.current = []
+  setState(emptyRoomState())
+}
+```
+
+**Add** a state broadcast to `promote()` so a new host seeds peers from its replica. Add it — do not replace the body. `announce()` must stay: beat-based tie resolution depends on every promotion announcing itself, and `stateAction.onMessage` no-ops whenever the receiver already believes it is host, so the state broadcast cannot substitute for it. Dropping `announce()` would leave a simultaneous double-claim undetected.
 
 ```ts
 const promote = () => {
@@ -2224,6 +2247,7 @@ const promote = () => {
   setIsHost(true)
   setStatus('connected')
   publishRoster()
+  announce()
   stateAction.send(confirmedRef.current)
 }
 ```

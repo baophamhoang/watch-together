@@ -5,6 +5,7 @@ import {SkipForward} from 'lucide-react'
 import {AddTrackForm} from './AddTrackForm'
 import {ChatComposer} from './ChatComposer'
 import {ChatPanel} from './ChatPanel'
+import {GifPicker} from './GifPicker'
 import {InviteBar} from './InviteBar'
 import {Queue} from './Queue'
 import {RoomTabs} from './RoomTabs'
@@ -16,7 +17,7 @@ import {useRoom} from '@/lib/sync/use-room'
 import {useSyncPlayback} from '@/lib/sync/use-sync-playback'
 import {useYouTubePlayer} from '@/lib/youtube/use-player'
 
-export function Room({code}: {code: string}) {
+export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) {
   const [name, setName] = useState('friend')
   const positionRef = useRef<() => number>(() => 0)
 
@@ -223,7 +224,16 @@ export function Room({code}: {code: string}) {
             <ChatPanel
               messages={room.messages}
               selfId={room.selfId}
-              composer={<ChatComposer onSend={body => room.sendChat('text', body)} />}
+              composer={
+                <ChatComposer
+                  onSend={body => room.sendChat('text', body)}
+                  gifSlot={
+                    gifsEnabled ? (
+                      <GifPicker onPick={url => room.sendChat('gif', url)} />
+                    ) : null
+                  }
+                />
+              }
             />
           }
         />

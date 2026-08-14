@@ -33,6 +33,10 @@ export function ChatPanel({
               const {initial, hue} = avatarFor(message.peerId, message.name)
               return (
                 <li key={message.id} className="flex gap-[var(--space-2)]">
+                  {/* The avatar's 2px top offset below is optical baseline
+                      correction against a 24px avatar next to a 16px text
+                      line, not a gap — exempt from the spacing scale, same as
+                      PresenceBar's h-8 w-8/border-2. */}
                   <span
                     aria-hidden
                     className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-full)] text-[10px] font-semibold text-bg"
@@ -48,7 +52,7 @@ export function ChatPanel({
                       <img
                         src={message.body}
                         alt="GIF"
-                        className="mt-1 max-h-48 rounded-[var(--radius-md)]"
+                        className="mt-[var(--space-1)] max-h-48 rounded-[var(--radius-md)]"
                       />
                     ) : (
                       <p className="break-words text-sm text-text">{message.body}</p>

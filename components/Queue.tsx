@@ -20,7 +20,7 @@ export function Queue({
   }
 
   return (
-    <ul className="flex flex-col gap-1" data-testid="queue">
+    <ul className="flex flex-col gap-[var(--space-1)]" data-testid="queue">
       {state.queue.map(track => (
         <li
           key={track.id}

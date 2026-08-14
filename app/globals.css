@@ -41,11 +41,14 @@
   --radius-lg: 14px;
   --radius-full: 999px;
 
-  /* Four steps. If a gap does not fit one of these, the layout is wrong. */
+  /* Five steps. If a gap does not fit one of these, the layout is wrong.
+     --space-5 is the odd one out: page-level rhythm (the landing page's
+     stacked sections), not component-internal spacing like the other four. */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 16px;
   --space-4: 24px;
+  --space-5: 32px;
 }
 
 @theme inline {

@@ -145,10 +145,10 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
   const add = (track: Track) => room.send({type: 'enqueue', track})
 
   return (
-    <main className="flex h-dvh flex-col lg:flex-row">
+    <main className="flex h-dvh flex-col landscape:flex-row lg:flex-row">
       {/* The video is the protagonist: it takes every pixel the rail does not. */}
-      <section className="flex min-w-0 flex-col lg:flex-1">
-        <div className="yt-player-shell relative aspect-video w-full shrink-0 bg-black lg:aspect-auto lg:flex-1">
+      <section className="flex min-w-0 flex-col landscape:flex-1 lg:flex-1">
+        <div className="yt-player-shell relative aspect-video w-full shrink-0 bg-black landscape:aspect-auto landscape:flex-1 lg:aspect-auto lg:flex-1">
           <div ref={containerRef} className="h-full w-full" />
 
           {loadError && (
@@ -218,7 +218,7 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
         </div>
       </section>
 
-      <aside className="flex min-h-0 w-full flex-1 flex-col border-border lg:w-[380px] lg:flex-none lg:border-l">
+      <aside className="flex min-h-0 w-full flex-1 flex-col border-border landscape:w-[380px] landscape:flex-none landscape:border-l lg:w-[380px] lg:flex-none lg:border-l">
         <InviteBar
           code={code}
           roster={room.roster}

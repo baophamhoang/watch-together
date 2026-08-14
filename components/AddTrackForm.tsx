@@ -62,22 +62,23 @@ export function AddTrackForm({
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex gap-2">
+    <div className="flex flex-col gap-[var(--space-2)]">
+      <div className="flex gap-[var(--space-2)]">
         <input
           value={url}
           onChange={event => setUrl(event.target.value)}
           onKeyDown={event => event.key === 'Enter' && submit()}
           placeholder="Paste a YouTube link"
+          aria-label="YouTube link"
           disabled={busy}
           data-testid="add-url"
-          className="flex-1 rounded-[var(--radius-md)] border border-border-strong bg-surface px-3 py-2 text-sm text-text placeholder:text-subtle"
+          className="min-h-11 flex-1 rounded-[var(--radius-md)] border border-border-strong bg-surface px-[var(--space-3)] py-[var(--space-2)] text-sm text-text placeholder:text-subtle"
         />
         <button
           onClick={submit}
           disabled={busy}
           data-testid="add-submit"
-          className="rounded-[var(--radius-md)] border border-border px-4 text-sm text-text hover:border-border-strong disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+          className="rounded-[var(--radius-md)] border border-border px-[var(--space-3)] text-sm text-text hover:border-border-strong disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
         >
           {busy ? 'Adding…' : 'Add'}
         </button>

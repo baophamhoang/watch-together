@@ -33,33 +33,33 @@ export default function LandingPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-8 px-6">
+    <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-[var(--space-5)] px-[var(--space-4)]">
       <header>
         <h1 className="text-3xl font-semibold tracking-tight">Watch Together</h1>
-        <p className="mt-2 text-sm text-muted">
+        <p className="mt-[var(--space-2)] text-sm text-muted">
           One queue, one player, everyone in sync.
         </p>
       </header>
 
-      <label className="flex flex-col gap-2 text-sm">
+      <label className="flex flex-col gap-[var(--space-2)] text-sm">
         <span className="text-muted">Your name</span>
         <input
           value={name}
           onChange={event => setName(event.target.value)}
           maxLength={24}
-          className="rounded-[var(--radius-md)] border border-border-strong bg-surface px-3 py-2 text-text"
+          className="min-h-11 rounded-[var(--radius-md)] border border-border-strong bg-surface px-[var(--space-3)] py-[var(--space-2)] text-text"
         />
       </label>
 
       <button
         onClick={() => enter(generateRoomCode())}
-        className="rounded-[var(--radius-md)] bg-text px-4 py-3 font-medium text-bg hover:opacity-90 cursor-pointer"
+        className="rounded-[var(--radius-md)] bg-text px-[var(--space-3)] py-[var(--space-3)] font-medium text-bg hover:bg-text/90 cursor-pointer"
       >
         Start a room
       </button>
 
-      <div className="flex flex-col gap-2">
-        <div className="flex gap-2">
+      <div className="flex flex-col gap-[var(--space-2)]">
+        <div className="flex gap-[var(--space-2)]">
           <input
             value={code}
             onChange={event => {
@@ -68,11 +68,12 @@ export default function LandingPage() {
             }}
             onKeyDown={event => event.key === 'Enter' && join()}
             placeholder="word-word-abcd"
-            className="flex-1 rounded-[var(--radius-md)] border border-border-strong bg-surface px-3 py-2 text-text placeholder:text-subtle"
+            aria-label="Room code"
+            className="min-h-11 flex-1 rounded-[var(--radius-md)] border border-border-strong bg-surface px-[var(--space-3)] py-[var(--space-2)] text-text placeholder:text-subtle"
           />
           <button
             onClick={join}
-            className="rounded-[var(--radius-md)] border border-border px-4 py-2 text-text hover:border-border-strong cursor-pointer"
+            className="rounded-[var(--radius-md)] border border-border px-[var(--space-3)] py-[var(--space-2)] text-text hover:border-border-strong cursor-pointer"
           >
             Join
           </button>

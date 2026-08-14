@@ -10,22 +10,29 @@ export function GifPicker({onPick}: {onPick(url: string): void}) {
   const [gifs, setGifs] = useState<Gif[]>([])
   const [error, setError] = useState<string | null>(null)
 
+  // Derived, not stored. An empty query shows nothing, and that is a function
+  // of `query` at render time — writing `setGifs([])` in the effect instead
+  // would cost an extra render and need a lint suppression to boot.
+  const trimmedQuery = query.trim()
+  const visibleGifs = trimmedQuery ? gifs : []
+
   useEffect(() => {
-    if (!open) return
-    const trimmed = query.trim()
-    if (!trimmed) {
-      // Clearing stale results when the search box empties is an intentional
-      // reset, not a derived value — mirrors the pattern in Room.tsx.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setGifs([])
-      return
-    }
-    // Debounced: the free tier allows 100 searches an hour, so a request per
-    // keystroke would exhaust it in about a minute of typing.
+    if (!open || !trimmedQuery) return
+
+    // Aborting matters twice over: it stops a superseded response from landing
+    // after a newer one and repainting the grid with results for a query the
+    // user has moved on from, and it actually cancels the request, which the
+    // free tier's 100-searches-an-hour ceiling makes worth doing.
+    const controller = new AbortController()
+
+    // Debounced: a request per keystroke would exhaust that quota in about a
+    // minute of typing.
     const timer = setTimeout(async () => {
       setError(null)
       try {
-        const response = await fetch(`/api/gifs?q=${encodeURIComponent(trimmed)}`)
+        const response = await fetch(`/api/gifs?q=${encodeURIComponent(trimmedQuery)}`, {
+          signal: controller.signal,
+        })
         if (!response.ok) {
           setError(
             response.status === 429
@@ -36,13 +43,19 @@ export function GifPicker({onPick}: {onPick(url: string): void}) {
           return
         }
         setGifs((await response.json()).gifs ?? [])
-      } catch {
+      } catch (cause) {
+        // An abort is us superseding our own request, not a failure to report.
+        if ((cause as Error | undefined)?.name === 'AbortError') return
         setError('GIF search is unavailable.')
         setGifs([])
       }
     }, 400)
-    return () => clearTimeout(timer)
-  }, [open, query])
+
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [open, trimmedQuery])
 
   return (
     <div className="relative shrink-0">
@@ -70,7 +83,7 @@ export function GifPicker({onPick}: {onPick(url: string): void}) {
           {error && <p className="p-[var(--space-2)] text-sm text-warn">{error}</p>}
 
           <div className="mt-[var(--space-2)] grid max-h-64 grid-cols-3 gap-[var(--space-1)] overflow-y-auto">
-            {gifs.map(gif => (
+            {visibleGifs.map(gif => (
               <button
                 key={gif.id}
                 onClick={() => {

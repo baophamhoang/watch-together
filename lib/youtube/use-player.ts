@@ -53,12 +53,21 @@ export function useYouTubePlayer(events: PlayerEvents) {
             if (!cancelled) setReady(true)
           },
           onStateChange: event => {
-            // A move we made ourselves is not a user action; broadcasting it
-            // would bounce back and forth between peers forever.
-            if (Date.now() < suppressUntil.current) return
+            // The end of a video is never an echo of something we did, so it is
+            // checked BEFORE the suppression gate. If it were suppressed, a drift
+            // correction landing within the window of the final second would swallow
+            // it and the queue would stall at the end of the video with no way
+            // forward but a manual skip. Duplicate `ended` reports are harmless: the
+            // reducer only advances while the track id still matches, so the second
+            // one is a no-op.
             if (event.data === YT.PlayerState.ENDED) {
               eventsRef.current.onEnded()
-            } else if (event.data === YT.PlayerState.PLAYING) {
+              return
+            }
+            // Play and pause DO echo: a move we made ourselves is not a user action,
+            // and broadcasting it would bounce between peers forever.
+            if (Date.now() < suppressUntil.current) return
+            if (event.data === YT.PlayerState.PLAYING) {
               eventsRef.current.onUserPlay()
             } else if (event.data === YT.PlayerState.PAUSED) {
               eventsRef.current.onUserPause(event.target.getCurrentTime())

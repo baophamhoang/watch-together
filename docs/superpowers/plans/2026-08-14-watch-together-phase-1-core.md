@@ -2471,6 +2471,9 @@ Add both timers to the cleanup function:
 ```ts
 return () => {
   clearTimeout(claimTimer)
+  // Task 11's pending-expiry timer. Keep it — this snippet showing only the
+  // timers Task 12 adds does not mean the earlier one should be dropped.
+  clearInterval(pendingTimer)
   clearInterval(beatTimer)
   clearInterval(clockTimer)
   room.leave()
@@ -2522,13 +2525,23 @@ export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
     else handle.pause()
   }, [handle, current, state.isPlaying])
 
+  // `room` is a fresh object literal on every render, so it must never appear
+  // in a dependency array — the interval below would be torn down and rebuilt
+  // on every render (roughly every 2s once beats arrive) and would tick
+  // erratically or barely at all. Drift correction is the entire product
+  // claim, and nothing in the test suite would notice it failing.
+  const roomRef = useRef(room)
+  useEffect(() => {
+    roomRef.current = room
+  })
+
   // Guests correct drift against the host's heartbeat. The host defines truth
   // and therefore never corrects itself.
   useEffect(() => {
     if (!handle || room.isHost) return
 
     const timer = setInterval(() => {
-      const {beat, offsetMs} = room
+      const {beat, offsetMs} = roomRef.current
       if (!beat || offsetMs === null) return
       if (beat.currentTrackId !== loadedTrackId.current) return
 
@@ -2554,7 +2567,10 @@ export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
       })
 
       if (correction.kind === 'none') {
-        if (resyncing) setResyncing(false)
+        // Unconditional: `resyncing` is not a dependency of this effect, so
+        // reading it here would be a stale closure. React bails out when the
+        // value is unchanged, making the redundant call free.
+        setResyncing(false)
         return
       }
 
@@ -2566,7 +2582,10 @@ export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
     }, CHECK_INTERVAL_MS)
 
     return () => clearInterval(timer)
-  }, [handle, room, resyncing])
+    // `room` is deliberately absent — see the roomRef note above. Only
+    // `room.isHost` matters, because it decides whether this effect runs at
+    // all, and it is a primitive so it does not churn.
+  }, [handle, room.isHost])
 
   return {resyncing, current}
 }

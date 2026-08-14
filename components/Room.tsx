@@ -147,7 +147,7 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
   return (
     <main className="flex h-dvh flex-col lg:flex-row">
       {/* The video is the protagonist: it takes every pixel the rail does not. */}
-      <section className="flex min-w-0 flex-1 flex-col">
+      <section className="flex min-w-0 flex-col lg:flex-1">
         <div className="yt-player-shell relative aspect-video w-full shrink-0 bg-black lg:aspect-auto lg:flex-1">
           <div ref={containerRef} className="h-full w-full" />
 
@@ -218,7 +218,7 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
         </div>
       </section>
 
-      <aside className="flex min-h-0 w-full flex-col border-border lg:w-[380px] lg:shrink-0 lg:border-l">
+      <aside className="flex min-h-0 w-full flex-1 flex-col border-border lg:w-[380px] lg:flex-none lg:border-l">
         <InviteBar
           code={code}
           roster={room.roster}

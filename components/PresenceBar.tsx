@@ -13,7 +13,7 @@ export function PresenceBar({
   if (roster.length === 0) return null
 
   return (
-    <ul className="flex items-center -space-x-2" aria-label={`${roster.length} watching`}>
+    <ul className="flex items-center -space-x-[var(--space-2)]" aria-label={`${roster.length} watching`}>
       {roster.map(entry => {
         const {initial, hue} = avatarFor(entry.peerId, entry.name)
         const isSelf = entry.peerId === selfId
@@ -24,7 +24,7 @@ export function PresenceBar({
             className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-full)] border-2 border-bg text-xs font-semibold text-bg"
             style={{backgroundColor: `hsl(${hue} 65% 72%)`}}
           >
-            {initial}
+            <span aria-hidden="true">{initial}</span>
             <span className="sr-only">{isSelf ? `${entry.name}, you` : entry.name}</span>
           </li>
         )

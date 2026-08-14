@@ -1,6 +1,6 @@
 'use client'
 
-import {useEffect, useState} from 'react'
+import {useEffect, useRef, useState} from 'react'
 import {ImagePlay} from 'lucide-react'
 import type {Gif} from '@/lib/gifs/types'
 
@@ -9,6 +9,12 @@ export function GifPicker({onPick}: {onPick(url: string): void}) {
   const [query, setQuery] = useState('')
   const [gifs, setGifs] = useState<Gif[]>([])
   const [error, setError] = useState<string | null>(null)
+  const toggleRef = useRef<HTMLButtonElement | null>(null)
+
+  const close = () => {
+    setOpen(false)
+    toggleRef.current?.focus()
+  }
 
   // Derived, not stored. An empty query shows nothing, and that is a function
   // of `query` at render time — writing `setGifs([])` in the effect instead
@@ -60,6 +66,7 @@ export function GifPicker({onPick}: {onPick(url: string): void}) {
   return (
     <div className="relative shrink-0">
       <button
+        ref={toggleRef}
         onClick={() => setOpen(o => !o)}
         aria-label="Add a GIF"
         aria-expanded={open}
@@ -70,7 +77,12 @@ export function GifPicker({onPick}: {onPick(url: string): void}) {
       </button>
 
       {open && (
-        <div className="absolute bottom-full right-0 mb-[var(--space-2)] w-72 rounded-[var(--radius-lg)] border border-border bg-surface p-[var(--space-2)] shadow-xl shadow-black/50">
+        <div
+          className="absolute bottom-full right-0 mb-[var(--space-2)] w-72 rounded-[var(--radius-lg)] border border-border bg-surface p-[var(--space-2)]"
+          onKeyDown={e => {
+            if (e.key === 'Escape') close()
+          }}
+        >
           <input
             autoFocus
             value={query}
@@ -83,17 +95,21 @@ export function GifPicker({onPick}: {onPick(url: string): void}) {
           {error && <p className="p-[var(--space-2)] text-sm text-warn">{error}</p>}
 
           <div className="mt-[var(--space-2)] grid max-h-64 grid-cols-3 gap-[var(--space-1)] overflow-y-auto">
-            {visibleGifs.map(gif => (
+            {visibleGifs.map((gif, index) => (
               <button
                 key={gif.id}
                 onClick={() => {
                   onPick(gif.url)
-                  setOpen(false)
+                  close()
                   setQuery('')
                 }}
                 className="overflow-hidden rounded-[var(--radius-sm)] cursor-pointer"
               >
-                <img src={gif.previewUrl} alt={gif.title || 'GIF'} className="h-20 w-full object-cover" />
+                <img
+                  src={gif.previewUrl}
+                  alt={gif.title || `GIF ${index + 1}`}
+                  className="h-20 w-full object-cover"
+                />
               </button>
             ))}
           </div>

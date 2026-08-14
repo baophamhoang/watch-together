@@ -28,7 +28,7 @@ export function Toasts({
       {items.map(item => (
         <p
           key={item.id}
-          className="rounded-[var(--radius-full)] bg-surface-raised px-[var(--space-3)] py-[var(--space-2)] text-sm text-text shadow-lg shadow-black/40"
+          className="rounded-[var(--radius-full)] border border-border bg-surface-raised px-[var(--space-3)] py-[var(--space-2)] text-sm text-text"
         >
           {item.message}
         </p>

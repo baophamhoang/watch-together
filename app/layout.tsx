@@ -14,8 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Watch Together",
-  description:
-    "Watch YouTube videos in sync with friends — one shared queue, peer-to-peer over WebRTC, no accounts and no backend.",
+  description: "Watch YouTube with friends, in sync. No accounts, no server.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

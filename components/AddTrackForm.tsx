@@ -71,18 +71,18 @@ export function AddTrackForm({
           placeholder="Paste a YouTube link"
           disabled={busy}
           data-testid="add-url"
-          className="flex-1 rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-neutral-500"
+          className="flex-1 rounded-[var(--radius-md)] border border-border-strong bg-surface px-3 py-2 text-sm text-text placeholder:text-subtle"
         />
         <button
           onClick={submit}
           disabled={busy}
           data-testid="add-submit"
-          className="rounded-lg border border-neutral-700 px-4 text-sm hover:border-neutral-500 disabled:opacity-50"
+          className="rounded-[var(--radius-md)] border border-border px-4 text-sm text-text hover:border-border-strong disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
         >
           {busy ? 'Adding…' : 'Add'}
         </button>
       </div>
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
     </div>
   )
 }

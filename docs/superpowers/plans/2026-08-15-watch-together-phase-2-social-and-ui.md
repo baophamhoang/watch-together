@@ -618,22 +618,15 @@ Add state and a roster-diff effect alongside the existing hooks:
   )
 ```
 
-Render `<Toasts items={toasts} onDismiss={dismissToast} />` as the last child of `<main>`, and put the presence bar in the rail header — which Task 4 builds. Until then, place it above `RoomTabs`:
+Render `<Toasts items={toasts} onDismiss={dismissToast} />` as the last child of `<main>`.
+
+The rail already opens with a header row carrying the room code and the status text — Task 2 preserved it because the end-to-end suite depends on both test ids. **Add the presence bar into that existing row rather than creating a second one**, between the code and the status:
 
 ```tsx
-<div className="flex items-center justify-between gap-[var(--space-3)] border-b border-border px-[var(--space-3)] py-[var(--space-2)]">
-  <PresenceBar roster={room.roster} selfId={room.selfId} />
-  <span className="text-xs text-muted" data-testid="status">
-    {room.status === 'connected'
-      ? `${room.roster.length} watching${room.isHost ? ' · host' : ''}`
-      : room.status === 'blocked'
-        ? 'network blocked'
-        : 'connecting…'}
-  </span>
-</div>
+<PresenceBar roster={room.roster} selfId={room.selfId} />
 ```
 
-Keep `data-testid="status"` and its exact text — the e2e suite asserts `2 watching` against it.
+Leave `data-testid="room-code"` and `data-testid="status"` exactly as they are, including the status string — the suite asserts `2 watching` against it. Task 4 replaces this whole row with a designed invite bar; for now it is a plain row that gains an avatar stack.
 
 - [ ] **Step 8: Verify**
 
@@ -742,7 +735,7 @@ The copied state says "Invite link copied" because the button copies the **whole
 
 - [ ] **Step 2: Replace the placeholder header in `Room.tsx`**
 
-Delete the temporary header block added in Task 3 Step 7 and put `InviteBar` in its place, as the first child of `<aside>`:
+Replace the rail's whole header row — the one carrying the room code, the presence bar and the status text — with `InviteBar`, as the first child of `<aside>`. `InviteBar` renders all three itself, including both test ids, so nothing is lost:
 
 ```tsx
 <InviteBar

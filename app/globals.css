@@ -31,6 +31,11 @@
   --warn: #fbbf24;
   --danger: #f87171;
 
+  /* Dims the video behind any overlay that needs to be read over it. Not a
+     surface — it is always composited over unknown video frames, which is
+     why it is an alpha rather than one of the flat surface colours. */
+  --scrim: rgb(0 0 0 / 0.85);
+
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;

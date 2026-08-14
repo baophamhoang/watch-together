@@ -180,11 +180,22 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
           {!activated && !loadError && !localBlock && (
             <TapToWatch
               onActivate={() => {
+                // A tap before the IFrame API has finished loading must not dismiss
+                // the gate. `handle` is null across a real network round trip, and
+                // the gate is the largest thing on screen from first paint, so an
+                // early tap is likely on exactly the slow mobile connections this
+                // feature exists for. Dismissing on that tap would strand the user:
+                // the gate never returns (`activated` is one-way), and the play()
+                // that useSyncPlayback issues once the handle appears comes from an
+                // effect, carries no user activation, and is blocked by the very
+                // policy this gate exists to satisfy — leaving a dead player with
+                // no affordance and nothing on screen suggesting a reload.
+                if (!handle) return
                 setActivated(true)
                 // Called inside the click handler so it runs under a real user
                 // gesture — that activation is exactly what the autoplay policy
                 // requires, and it does not survive an async hop.
-                handle?.play()
+                handle.play()
               }}
             />
           )}
@@ -269,7 +280,7 @@ function PlayerOverlay({
   action?: {label: string; onClick(): void}
 }) {
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-[var(--space-3)] bg-black/85 p-[var(--space-4)] text-center">
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-[var(--space-3)] bg-[var(--scrim)] p-[var(--space-4)] text-center">
       <p className="max-w-sm text-sm text-text">{children}</p>
       {action && (
         <button

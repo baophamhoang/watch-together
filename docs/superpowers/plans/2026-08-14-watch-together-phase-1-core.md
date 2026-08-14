@@ -61,15 +61,16 @@ The reference app's single brittle regex is the thing that most visibly fails. T
 npm install -D vitest@^4 @types/youtube
 ```
 
-- [ ] **Step 2: Create `vitest.config.ts`**
+- [ ] **Step 2: Create `vitest.config.mts`**
+
+The `.mts` extension matters: this project's `package.json` has no `"type": "module"`, so a `.ts` config is loaded as CommonJS and Vite's native config loader warns on **every** test run. A permanently noisy baseline is not acceptable in a project whose later Chrome MCP checks judge success partly by an empty console. For the same reason the alias uses `import.meta.dirname` — `__dirname` does not exist under the ESM loader, so copying it here would silently break `@` path resolution.
 
 ```ts
 import {defineConfig} from 'vitest/config'
-import {resolve} from 'node:path'
 
 export default defineConfig({
   test: {environment: 'node', include: ['lib/**/*.test.ts', 'app/**/*.test.ts']},
-  resolve: {alias: {'@': resolve(__dirname, '.')}},
+  resolve: {alias: {'@': import.meta.dirname}},
 })
 ```
 
@@ -210,7 +211,7 @@ Expected: PASS, all cases green.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add vitest.config.ts package.json package-lock.json lib/youtube/parse-url.ts lib/youtube/parse-url.test.ts
+git add vitest.config.mts package.json package-lock.json lib/youtube/parse-url.ts lib/youtube/parse-url.test.ts
 git commit -m "feat: YouTube URL parser with vitest harness"
 ```
 
@@ -253,6 +254,10 @@ describe('generateRoomCode', () => {
   it('varies across calls', () => {
     const codes = new Set(Array.from({length: 50}, () => generateRoomCode()))
     expect(codes.size).toBeGreaterThan(45)
+  })
+
+  it('still produces a valid code when random() returns its exclusive bound', () => {
+    expect(isValidRoomCode(generateRoomCode(() => 1))).toBe(true)
   })
 })
 
@@ -313,8 +318,13 @@ const CODE_PATTERN = new RegExp(
   `^[a-z]+-[a-z]+-[${SUFFIX_ALPHABET}]{${SUFFIX_LENGTH}}$`,
 )
 
+// Clamped because `random` is an injected parameter: a caller supplying a
+// PRNG that can return exactly 1 (a common rounding bug in hand-rolled
+// generators) would otherwise index past the end and stringify `undefined`
+// into the code, producing a code that fails its own validator.
 function pick<T>(list: readonly T[], random: () => number): T {
-  return list[Math.floor(random() * list.length)]
+  const index = Math.floor(random() * list.length)
+  return list[Math.min(Math.max(index, 0), list.length - 1)]
 }
 
 export function generateRoomCode(random: () => number = Math.random): string {
@@ -557,6 +567,23 @@ describe('applyIntent', () => {
     expect(next.currentTrackId).toBe('b')
   })
 
+  it('stops playback when the only track is marked unplayable', () => {
+    const next = applyIntent(
+      withQueue(['a'], 'a'),
+      {type: 'unplayable', trackId: 'a', reason: 'embed-blocked'},
+      9000,
+    )
+    expect(next.queue[0].unplayable).toBe('embed-blocked')
+    expect(next.isPlaying).toBe(false)
+  })
+
+  it('skips over already-unplayable tracks instead of looping', () => {
+    let state = withQueue(['a', 'b', 'c'], 'a')
+    state = applyIntent(state, {type: 'unplayable', trackId: 'b', reason: 'embed-blocked'}, 9000)
+    const next = applyIntent(state, {type: 'unplayable', trackId: 'a', reason: 'embed-blocked'}, 9500)
+    expect(next.currentTrackId).toBe('c')
+  })
+
   it('ignores intents referencing unknown tracks', () => {
     const base = withQueue(['a'], 'a')
     expect(applyIntent(base, {type: 'remove', trackId: 'ghost'}, 9000)).toBe(base)
@@ -592,6 +619,17 @@ function nextTrackId(queue: Track[], currentId: string | null): string | null {
   const index = queue.findIndex(t => t.id === currentId)
   if (index === -1) return queue[0].id
   return queue[(index + 1) % queue.length].id
+}
+
+/** Next track not already known-unplayable, or null when none remain. */
+function nextPlayableTrackId(queue: Track[], currentId: string | null): string | null {
+  if (queue.length === 0) return null
+  const start = queue.findIndex(t => t.id === currentId)
+  for (let step = 1; step <= queue.length; step++) {
+    const candidate = queue[(start + step) % queue.length]
+    if (!candidate.unplayable) return candidate.id
+  }
+  return null
 }
 
 function startTrack(state: RoomState, trackId: string | null, now: number): RoomState {
@@ -645,7 +683,7 @@ export function applyIntent(state: RoomState, intent: Intent, now: number): Room
         ? startTrack(state, nextTrackId(state.queue, state.currentTrackId), now)
         : state
       const queue = advanced.queue.filter(t => t.id !== intent.trackId)
-      if (queue.length === 0) return bump({...emptyRoomState(), version: state.version})
+      if (queue.length === 0) return bump(emptyRoomState())
       const currentTrackId = advanced.currentTrackId === intent.trackId
         ? queue[0].id
         : advanced.currentTrackId
@@ -667,9 +705,13 @@ export function applyIntent(state: RoomState, intent: Intent, now: number): Room
       const queue = state.queue.map(t =>
         t.id === intent.trackId ? {...t, unplayable: intent.reason} : t)
       const marked = {...state, queue}
-      return bump(intent.trackId === state.currentTrackId
-        ? startTrack(marked, nextTrackId(queue, state.currentTrackId), now)
-        : marked)
+      if (intent.trackId !== state.currentTrackId) return bump(marked)
+      const next = nextPlayableTrackId(queue, state.currentTrackId)
+      // Nothing left that can play. Stop, rather than restarting a track we
+      // already know errors — the player would fail again, send another
+      // `unplayable`, and spin, re-broadcasting state to every peer each pass.
+      if (next === null) return bump({...marked, isPlaying: false})
+      return bump(startTrack(marked, next, now))
     }
   }
 }

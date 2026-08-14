@@ -79,13 +79,16 @@ export function Room({code}: {code: string}) {
 
   // Debug instrumentation. The YouTube iframe is cross-origin, so this is the
   // only way an automated check can read what each peer is actually playing.
-  // No `NODE_ENV === 'production'` guard: `next build` inlines NODE_ENV into
-  // the client bundle at build time, so `next start` — the only way this whole
-  // phase is verified, since dev's Strict Mode double-invokes effects and
-  // races the host election — is indistinguishable from production here. A
-  // guard would strip this from the exact build it needs to work in. This
-  // project has no real deployment yet, so there is no other build to protect.
+  // Gated on NEXT_PUBLIC_WT_DEBUG, deliberately NOT `NODE_ENV === 'production'`:
+  // `next build` inlines NODE_ENV into the client bundle at build time, so
+  // `next start` — the only way this whole phase is verified, since dev's
+  // Strict Mode double-invokes effects and races the host election — is
+  // indistinguishable from production by that check. A NODE_ENV guard would
+  // strip this from the exact build it needs to work in. playwright.config.ts
+  // sets NEXT_PUBLIC_WT_DEBUG=1 for its webServer (build and start both) so
+  // the e2e suite keeps working; it is unset for a real production build.
   useEffect(() => {
+    if (process.env.NEXT_PUBLIC_WT_DEBUG !== '1') return
     ;(window as unknown as {__watchTogether?: unknown}).__watchTogether = {
       readAt: () => ({
         at: Date.now(),

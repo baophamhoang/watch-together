@@ -47,16 +47,26 @@ export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
   // the just-removed video forever on every peer. Reset `loadedTrackId` too,
   // so a later re-add loads cleanly instead of being mistaken for the track
   // already "loaded".
+  //
+  // Depends on `current?.id`, not `current`: on a guest, `current` is derived
+  // from freshly deserialized state on every host broadcast (any intent, not
+  // just ones affecting this track), so the object reference changes far more
+  // often than the track itself does. Depending on the whole object made this
+  // effect re-run on every broadcast, each run calling handle.play()/pause()
+  // again and re-extending use-player's suppression window — long enough to
+  // swallow a genuine user play/pause near any queue change. `current?.id` is
+  // the only part of `current` this effect reads, so it's also the only part
+  // that belongs in the dependency array.
   useEffect(() => {
     if (!handle) return
-    if (!current) {
+    if (!current?.id) {
       handle.pause()
       loadedTrackId.current = null
       return
     }
     if (state.isPlaying) handle.play()
     else handle.pause()
-  }, [handle, current, state.isPlaying])
+  }, [handle, current?.id, state.isPlaying])
 
   // Guests correct drift against the host's heartbeat. The host defines truth
   // and therefore never corrects itself.

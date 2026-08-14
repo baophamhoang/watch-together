@@ -2451,6 +2451,11 @@ beatAction.onMessage = (incoming, {peerId}) => {
     if (resolveHostTie(selfId, peerId) === 'demote') demote()
     return
   }
+  // A beat proves a host already exists, so the claim timer must not
+  // self-promote. Losing this line makes every guest joining an established
+  // room claim it after HOST_CLAIM_MS, broadcast a roster nobody should
+  // trust, and only then get demoted on hearing the real host.
+  sawHostRef.current = true
   const isNewHost = hostIdRef.current !== peerId
   hostIdRef.current = peerId
   setBeat(incoming)

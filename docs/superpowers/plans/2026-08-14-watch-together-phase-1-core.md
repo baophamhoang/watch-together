@@ -2205,8 +2205,16 @@ const pendingTimer = setInterval(() => {
   const {kept, expired} = expirePending(pendingRef.current, Date.now())
   if (expired.length === 0) return
   pendingRef.current = kept
-  displayRef.current = confirmedRef.current
-  setState(confirmedRef.current)
+  // Rebuild the display from confirmed state plus the intents still in
+  // flight, rather than hard-resetting to confirmed alone. Keeping an entry
+  // in `pendingRef` while erasing its visual effect is self-contradictory:
+  // the user would watch a change made half a second ago vanish even though
+  // we still expect it to land.
+  displayRef.current = kept.reduce(
+    (state, item) => applyIntent(state, item.intent, item.sentAt),
+    confirmedRef.current,
+  )
+  setState(displayRef.current)
   setWarning('Lost contact with the host — that change did not stick.')
 }, 500)
 ```
@@ -2235,9 +2243,31 @@ const demote = () => {
   confirmedRef.current = emptyRoomState()
   displayRef.current = emptyRoomState()
   pendingRef.current = []
+  // Clear the warning too, or a "lost contact with the host" message can
+  // linger after losing a tie — alarming and no longer true.
+  setWarning(null)
   setState(emptyRoomState())
 }
 ```
+
+> **Known gap, deferred to a later phase: pending intents are cleared imprecisely.**
+> `RoomState.version` is a single global counter, not correlated to any particular
+> guest's intent, so `showConfirmed` clears *all* of a guest's pending entries
+> whenever it accepts any newer state — including state produced by a different
+> guest's unrelated intent. In ordinary concurrent use the effect is transient:
+> guest A's change briefly disappears from A's own view until the host's next
+> broadcast includes it. The lossy case is narrow — the host dying between
+> broadcasting one guest's intent and processing another's — but it is silent,
+> because the pending entry that would have raised a warning is already gone.
+>
+> Fixing this properly requires per-intent correlation on the wire: each intent
+> carries a per-peer sequence number, the host echoes the highest sequence it has
+> applied per peer in `RoomState`, and a guest clears only entries at or below its
+> own acknowledged sequence. That changes the reducer contract and `RoomState`,
+> which is more than phase 1's "core features work" bar justifies. Do **not**
+> attempt the naive alternative of never clearing and always re-folding pending
+> onto confirmed — that guarantees double-application of already-confirmed
+> intents (a double skip, for instance) until they expire.
 
 **Add** a state broadcast to `promote()` so a new host seeds peers from its replica. Add it — do not replace the body. `announce()` must stay: beat-based tie resolution depends on every promotion announcing itself, and `stateAction.onMessage` no-ops whenever the receiver already believes it is host, so the state broadcast cannot substitute for it. Dropping `announce()` would leave a simultaneous double-claim undetected.
 

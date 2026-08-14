@@ -1717,10 +1717,20 @@ Attach `ref={toggleRef}` to the toggle button, call `close()` after picking a GI
 Run:
 
 ```bash
-grep -rn "neutral-\|slate-\|gray-\|rounded-lg\|rounded-xl" components/ app/ --include=*.tsx
+grep -rnE "(bg|text|border|ring|shadow|fill|stroke|divide|from|to|via|placeholder|accent|caret|outline|decoration)-(neutral|slate|gray|zinc|stone)-|rounded-(sm|md|lg|xl|2xl|3xl|full)\b|(bg|text|border|shadow|ring)-(black|white)/" components/ app/ --include="*.tsx"
 ```
 
 Expected: no output. Anything listed is a leftover to convert.
+
+Three things about that command, each of which cost a run to find:
+
+- `--include="*.tsx"` **must stay quoted.** Unquoted, zsh expands it against the current directory and the whole command dies with `no matches found` before grep ever runs — a verification step that silently fails to verify.
+- The colour half is anchored to a utility prefix rather than matching the palette name loosely. A bare `slate-` matches `tran`**`slate-`**`x-1/2`, so an unanchored pattern reports a hit on every centred element and trains you to skim past real findings.
+- The radius half needs `\b` so that `rounded-[var(--radius-full)]` — the correct token form — is not flagged as a violation of itself.
+
+Two deliberate exclusions, so their absence is not read as an oversight: `bg-black` (no slash) on the player shell is the letterbox behind a video frame, where true black is the right answer and no token applies; and `--scrim` covers the overlay alphas as of Task 7.
+
+One conversion the grep cannot see, in `app/page.tsx`: the primary CTA is `bg-white … text-neutral-950`. Make it `bg-text text-bg`, matching the play button inside `TapToWatch`. The tokens are near-white and near-black, so it looks the same and stops being the one hardcoded pair left in the app.
 
 - [ ] **Step 4: Verify contrast and structure in a real browser**
 
@@ -1763,9 +1773,12 @@ Run: `npm test && npx tsc --noEmit && npm run lint`
 Expected: all green.
 
 ```bash
-git add components/Queue.tsx components/AddTrackForm.tsx app/page.tsx app/layout.tsx
+git add components/Queue.tsx components/AddTrackForm.tsx app/page.tsx app/layout.tsx \
+        components/Room.tsx components/PresenceBar.tsx components/Toasts.tsx components/GifPicker.tsx
 git commit -m "feat: token-based styling and accessibility pass"
 ```
+
+That list covers all eight files this task touches — the four original surfaces, plus `Room.tsx` from Step 0 and the three carrying fixes routed here from Tasks 3, 4 and 6. Run `git status` afterwards and confirm nothing is left unstaged.
 
 ---
 

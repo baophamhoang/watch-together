@@ -1051,14 +1051,16 @@ export function ChatPanel({
 
 - [ ] **Step 9: Wire unread counting**
 
-In `components/RoomTabs.tsx`, add an optional `onChatOpened?: () => void` prop and call it when the chat tab is selected:
+In `components/RoomTabs.tsx`, add an optional `onTabChange?: (tab: 'queue' | 'chat') => void` prop. It reports **which** tab is now showing, not merely that chat was opened once — the consumer needs to know when the user leaves chat as well, or the unread badge can never re-arm.
 
 ```tsx
-onClick={() => {
-  setTab('chat')
-  onChatOpened?.()
-}}
+const select = (next: 'queue' | 'chat') => {
+  setTab(next)
+  onTabChange?.(next)
+}
 ```
+
+Both tab buttons call `select('queue')` / `select('chat')` instead of `setTab` directly.
 
 In `Room.tsx`, track unread messages and reset on open:
 
@@ -1074,7 +1076,16 @@ In `Room.tsx`, track unread messages and reset on open:
   }, [room.messages.length])
 ```
 
-Pass `unreadCount={unread}` and `onChatOpened={() => { chatOpen.current = true; setUnread(0) }}` to `RoomTabs`, and replace the placeholder chat node with:
+Pass `unreadCount={unread}` and a handler that tracks the current tab in both directions, so returning to the queue re-arms the badge:
+
+```tsx
+onTabChange={next => {
+  chatOpen.current = next === 'chat'
+  if (next === 'chat') setUnread(0)
+}}
+```
+
+Replace the placeholder chat node with:
 
 ```tsx
 chat={

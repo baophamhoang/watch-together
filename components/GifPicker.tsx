@@ -9,6 +9,7 @@ export function GifPicker({onPick}: {onPick(url: string): void}) {
   const [query, setQuery] = useState('')
   const [gifs, setGifs] = useState<Gif[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
   const toggleRef = useRef<HTMLButtonElement | null>(null)
 
   const close = () => {
@@ -35,6 +36,7 @@ export function GifPicker({onPick}: {onPick(url: string): void}) {
     // minute of typing.
     const timer = setTimeout(async () => {
       setError(null)
+      setLoading(true)
       try {
         const response = await fetch(`/api/gifs?q=${encodeURIComponent(trimmedQuery)}`, {
           signal: controller.signal,
@@ -54,6 +56,11 @@ export function GifPicker({onPick}: {onPick(url: string): void}) {
         if ((cause as Error | undefined)?.name === 'AbortError') return
         setError('GIF search is unavailable.')
         setGifs([])
+      } finally {
+        // Runs on the abort path too, which is correct: an aborted request means
+        // the user typed again, so we are back in the debounce window and not
+        // fetching. The replacement request sets this true again 400ms later.
+        setLoading(false)
       }
     }, 400)
 
@@ -92,7 +99,19 @@ export function GifPicker({onPick}: {onPick(url: string): void}) {
             className="w-full rounded-[var(--radius-md)] border border-border-strong bg-surface-raised px-[var(--space-3)] py-[var(--space-2)] text-sm text-text placeholder:text-subtle"
           />
 
-          {error && <p className="p-[var(--space-2)] text-sm text-warn">{error}</p>}
+          {/* `text-danger`, not `text-warn`: "GIF search is unavailable." is a
+              failure, and the two sibling forms in this app (AddTrackForm and
+              the landing page) already say so in the same colour. */}
+          {error && <p className="p-[var(--space-2)] text-sm text-danger">{error}</p>}
+
+          {/* Both states exist twelve inches away in AddTrackForm; a search box
+              that shows nothing while it works reads as broken. */}
+          {loading && <p className="p-[var(--space-2)] text-sm text-muted">Searching…</p>}
+          {!loading && !error && trimmedQuery && visibleGifs.length === 0 && (
+            <p className="p-[var(--space-2)] text-sm text-muted">
+              {`No GIFs for “${trimmedQuery}”`}
+            </p>
+          )}
 
           <div className="mt-[var(--space-2)] grid max-h-64 grid-cols-3 gap-[var(--space-1)] overflow-y-auto">
             {visibleGifs.map((gif, index) => (
@@ -105,9 +124,11 @@ export function GifPicker({onPick}: {onPick(url: string): void}) {
                 }}
                 className="overflow-hidden rounded-[var(--radius-sm)] cursor-pointer"
               >
+                {/* eslint-disable-next-line @next/next/no-img-element -- up to 18 animated GIFs per search; next/image passes GIFs through unoptimised, so it would proxy every one through our own server for no benefit, in front of a CDN that already is one. */}
                 <img
                   src={gif.previewUrl}
                   alt={gif.title || `GIF ${index + 1}`}
+                  loading="lazy"
                   className="h-20 w-full object-cover"
                 />
               </button>

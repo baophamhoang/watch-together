@@ -66,7 +66,11 @@ export default function LandingPage() {
               setCode(event.target.value)
               setError(null)
             }}
-            onKeyDown={event => event.key === 'Enter' && join()}
+            // `isComposing` guard: while an IME is open, Enter accepts the
+            // candidate rather than submitting the form.
+            onKeyDown={event => {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) join()
+            }}
             placeholder="word-word-abcd"
             aria-label="Room code"
             className="min-h-11 flex-1 rounded-[var(--radius-md)] border border-border-strong bg-surface px-[var(--space-3)] py-[var(--space-2)] text-text placeholder:text-subtle"

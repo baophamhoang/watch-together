@@ -97,6 +97,13 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
   // strip this from the exact build it needs to work in. playwright.config.ts
   // sets NEXT_PUBLIC_WT_DEBUG=1 for its webServer (build and start both) so
   // the e2e suite keeps working; it is unset for a real production build.
+  //
+  // The dependency array below is honest about what the body reads but claims
+  // no precision: `room` is a fresh object on every render (see useRoom), so
+  // this effect runs every render regardless of what else is listed. That is
+  // intentional and cheap — it only reassigns one property on window — and the
+  // hook must not be "optimized" into depending on the pieces instead, since
+  // the whole point is that the reader sees current values.
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_WT_DEBUG !== '1') return
     ;(window as unknown as {__watchTogether?: unknown}).__watchTogether = {
@@ -133,14 +140,27 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
   )
 
   const [unread, setUnread] = useState(0)
-  const seenCount = useRef(0)
+  const seenId = useRef<string | null>(null)
   const chatOpen = useRef(false)
 
+  // Keyed on the newest message's IDENTITY, not on `messages.length`. The
+  // history is capped at CHAT_HISTORY_LIMIT, so past 200 messages the length
+  // pins forever — and a dependency that stops changing is an effect that stops
+  // running. The badge would stop counting at exactly the moment the room is
+  // busiest. Counting from the last-seen id rather than a stored count survives
+  // the same cap: `seenIndex` is -1 both on the first run and once the last-seen
+  // message has itself been evicted, and `length - 1 - (-1)` is the whole
+  // visible history, which is the right answer in both cases.
+  const messages = room.messages
+  const lastMessageId = messages.at(-1)?.id
+
   useEffect(() => {
-    const added = room.messages.length - seenCount.current
-    seenCount.current = room.messages.length
-    if (added > 0 && !chatOpen.current) setUnread(u => u + added)
-  }, [room.messages.length])
+    if (!lastMessageId || lastMessageId === seenId.current) return
+    const seenIndex = messages.findIndex(m => m.id === seenId.current)
+    const added = messages.length - 1 - seenIndex
+    seenId.current = lastMessageId
+    if (!chatOpen.current) setUnread(u => u + added)
+  }, [lastMessageId, messages])
 
   const add = (track: Track) => room.send({type: 'enqueue', track})
 

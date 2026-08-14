@@ -29,7 +29,13 @@ export function Queue({
             track.id === state.currentTrackId ? 'bg-surface-raised' : 'hover:bg-surface'
           }`}
         >
-          <img src={track.thumbnail} alt="" className="h-10 w-16 shrink-0 rounded-[var(--radius-sm)] object-cover" />
+          {/* eslint-disable-next-line @next/next/no-img-element -- a fixed 64x40 decorative thumbnail already served by YouTube's CDN; next/image would add a proxy hop and a layout wrapper to save nothing. */}
+          <img
+            src={track.thumbnail}
+            alt=""
+            loading="lazy"
+            className="h-10 w-16 shrink-0 rounded-[var(--radius-sm)] object-cover"
+          />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm text-text">{track.title}</p>
             <p className="truncate text-xs text-muted">

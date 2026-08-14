@@ -2,7 +2,7 @@
 
 import {type RefObject, useEffect, useRef, useState} from 'react'
 import {joinRoom, selfId} from 'trystero'
-import {appendMessage} from '@/lib/chat/messages'
+import {appendMessage, isChatMessage} from '@/lib/chat/messages'
 import type {ChatKind, ChatMessage} from '@/lib/chat/types'
 import {DEFAULT_NICKNAME, MAX_NICKNAME_LENGTH} from '@/lib/identity'
 import {bestOffset, makeSample, pushSample, type ClockSample} from './clock'
@@ -129,6 +129,14 @@ export function useRoom(
       // Deliberately not gated on hostIdRef: chat needs no ordering guarantee and
       // should keep working through a host hand-off. The peer's own claimed name
       // is used as-is — this is a room you shared a code with, not a public space.
+      //
+      // Validated first, though. `ChatMessage` is a compile-time claim about a
+      // payload another browser wrote, and the renderer trusts it: a message
+      // whose `name` is not a string throws inside avatarFor DURING RENDER,
+      // which unmounts the whole tree — player, queue and connection with it —
+      // and then re-throws on every render after, because the payload is now in
+      // state. Dropping it here is the only place that costs nothing.
+      if (!isChatMessage(incoming)) return
       setMessages(current => appendMessage(current, incoming))
     }
 

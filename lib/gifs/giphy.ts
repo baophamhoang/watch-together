@@ -1,5 +1,27 @@
 import type {Gif} from './types'
 
+/**
+ * Whether a URL is safe to hand to an `<img src>` that a peer chose.
+ *
+ * NOT an XSS guard — React escapes the attribute, and `<img src>` executes
+ * neither `javascript:` nor `data:text/html`. It is a beacon and availability
+ * guard: without it, any peer can make every other participant's browser issue
+ * a request to a host of their choosing, which leaks IP addresses and lets one
+ * person point the whole room at an arbitrarily large download.
+ *
+ * `endsWith('.giphy.com')` with the leading dot on purpose: matching
+ * `giphy.com` loosely would also accept `evilgiphy.com`.
+ */
+export function isGiphyUrl(raw: string): boolean {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return false
+  }
+  return url.protocol === 'https:' && url.hostname.endsWith('.giphy.com')
+}
+
 export function giphySearchUrl(query: string, key: string, limit: number): string {
   const url = new URL('https://api.giphy.com/v1/gifs/search')
   url.searchParams.set('q', query)

@@ -2,6 +2,7 @@
 
 import {useEffect, useRef} from 'react'
 import {avatarFor} from '@/lib/presence'
+import {isGiphyUrl} from '@/lib/gifs/giphy'
 import type {ChatMessage} from '@/lib/chat/types'
 
 export function ChatPanel({
@@ -15,9 +16,14 @@ export function ChatPanel({
 }) {
   const endRef = useRef<HTMLDivElement | null>(null)
 
+  // Keyed on the newest message's identity, not on `messages.length`: the
+  // history is capped, so the length pins at the cap forever and the log would
+  // silently stop following new messages from the 200th onward.
+  const lastMessageId = messages.at(-1)?.id
+
   useEffect(() => {
     endRef.current?.scrollIntoView({block: 'end'})
-  }, [messages.length])
+  }, [lastMessageId])
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -48,7 +54,14 @@ export function ChatPanel({
                     <p className="text-xs text-muted">
                       {message.peerId === selfId ? `${message.name} (you)` : message.name}
                     </p>
-                    {message.kind === 'gif' ? (
+                    {/* Rendered as an image only when the URL is one we handed
+                        out. `body` on a gif message is an arbitrary string from
+                        another browser, and an unchecked <img src> lets any peer
+                        point every participant's browser at a host of their
+                        choosing. Anything else falls back to text, which is
+                        honest — the URL is still readable. */}
+                    {message.kind === 'gif' && isGiphyUrl(message.body) ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- src is an arbitrary peer-supplied URL; next/image's remotePatterns is an allowlist, so it would either reject these or turn our server into a public open image proxy.
                       <img
                         src={message.body}
                         alt="GIF"

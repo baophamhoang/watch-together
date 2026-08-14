@@ -23,8 +23,12 @@ export function ChatComposer({
       <input
         value={draft}
         onChange={e => setDraft(e.target.value)}
+        // `isComposing` guard: while an IME is open, Enter accepts the candidate
+        // rather than sending. Without it, a user typing Japanese, Chinese or
+        // Korean sends a half-composed message on the Enter that picks a
+        // character.
         onKeyDown={e => {
-          if (e.key === 'Enter') submit()
+          if (e.key === 'Enter' && !e.nativeEvent.isComposing) submit()
         }}
         placeholder="Message"
         aria-label="Message"

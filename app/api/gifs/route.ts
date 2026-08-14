@@ -13,8 +13,15 @@ export async function GET(request: Request) {
 
   let upstream: Response
   try {
+    // Cached the same way the sibling /api/oembed route caches YouTube. The
+    // free tier is 100 searches an hour, and the case for that being enough
+    // rests on debounced input AND repeated queries being answered from cache —
+    // debouncing shipped, this did not, so the quota argument had a hole in it.
+    // A room of five people all searching "cat" is one upstream call, not five.
     upstream = await fetch(giphySearchUrl(query, key, LIMIT), {
+      next: {revalidate: 3600},
       headers: {accept: 'application/json'},
+      signal: AbortSignal.timeout(5000),
     })
   } catch {
     return Response.json({error: 'giphy unreachable'}, {status: 502})
@@ -27,7 +34,10 @@ export async function GET(request: Request) {
   if (!upstream.ok) return Response.json({error: 'giphy rejected the request'}, {status: 502})
 
   try {
-    return Response.json({gifs: mapGiphy(await upstream.json())})
+    return Response.json(
+      {gifs: mapGiphy(await upstream.json())},
+      {headers: {'cache-control': 'public, max-age=3600, stale-while-revalidate=86400'}},
+    )
   } catch {
     return Response.json({error: 'unexpected giphy response'}, {status: 502})
   }

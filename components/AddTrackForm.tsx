@@ -67,7 +67,12 @@ export function AddTrackForm({
         <input
           value={url}
           onChange={event => setUrl(event.target.value)}
-          onKeyDown={event => event.key === 'Enter' && submit()}
+          // `isComposing` guard: while an IME is open, Enter accepts the
+          // candidate rather than submitting. Without it, typing Japanese,
+          // Chinese or Korean fires this on the Enter that picks a character.
+          onKeyDown={event => {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) submit()
+          }}
           placeholder="Paste a YouTube link"
           aria-label="YouTube link"
           disabled={busy}
@@ -78,7 +83,11 @@ export function AddTrackForm({
           onClick={submit}
           disabled={busy}
           data-testid="add-submit"
-          className="rounded-[var(--radius-md)] border border-border px-[var(--space-3)] text-sm text-text hover:border-border-strong disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+          // One disabled treatment across the app: subtle text with the hover
+          // affordance suppressed, matching ChatComposer's send button and the
+          // skip button. This button's hover moves the border rather than the
+          // background, so that is the one neutralised here.
+          className="rounded-[var(--radius-md)] border border-border px-[var(--space-3)] text-sm text-text hover:border-border-strong disabled:text-subtle disabled:hover:border-border cursor-pointer disabled:cursor-not-allowed"
         >
           {busy ? 'Adding…' : 'Add'}
         </button>

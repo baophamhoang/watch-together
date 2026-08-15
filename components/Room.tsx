@@ -200,10 +200,17 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
             </PlayerOverlay>
           )}
 
+          {!current && !loadError && (
+            <PlayerOverlay>
+              Nothing queued yet. Paste a YouTube link in the Queue tab and it
+              will start here for everyone at once.
+            </PlayerOverlay>
+          )}
+
           {/* Suppressed alongside the other two overlays rather than stacked on top
               of them: this renders last, so an un-suppressed gate would sit above
               the unplayable overlay and swallow its "Skip for everyone" button. */}
-          {!activated && !loadError && !localBlock && (
+          {current && !activated && !loadError && !localBlock && (
             <TapToWatch
               // This closure must NOT be memoized. `handle` comes from a
               // useMemo keyed on the player's readiness, so the `if (!handle)`

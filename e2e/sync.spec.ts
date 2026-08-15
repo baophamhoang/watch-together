@@ -204,6 +204,13 @@ test('a link-joiner is prompted for a name, and a stray blur does not commit "fr
   await expect(nameInput).toHaveAttribute('placeholder', 'Your name')
   await expect(nameInput).toBeFocused()
 
+  // The gate only renders once there is something to watch — an empty room
+  // shows a "nothing queued" prompt instead (see Room.tsx), not this gate.
+  // Queuing a track is unrelated to what this test checks; it only makes the
+  // gate exist so the click below has a target.
+  await page.getByTestId('add-url').fill(VIDEO_URL)
+  await page.getByTestId('add-submit').click()
+
   // The realistic trigger, per the finding this test exists to cover: tapping
   // the video gate to start playback, not deliberately dismissing the name
   // prompt. Any click elsewhere blurs the input the same way; this is the one

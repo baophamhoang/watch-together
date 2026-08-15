@@ -519,24 +519,34 @@ No sync work: `announceNameRef` already broadcasts on every change of the `name`
 
 `loadNickname` cannot currently distinguish "nothing stored" from "stored the word friend", and the difference decides whether to prompt. Add to `lib/identity.test.ts`:
 
+The file already has a `fakeStorage()` helper and seeds it through `saveNickname` rather than writing raw keys — follow that, both to match the surrounding style and because the storage key is a private constant that tests have no business knowing.
+
 ```ts
 describe('hasStoredNickname', () => {
   it('is false when nothing is stored', () => {
-    expect(hasStoredNickname(storageWith(null))).toBe(false)
+    expect(hasStoredNickname(fakeStorage())).toBe(false)
   })
 
   it('is false when the stored value is blank', () => {
-    expect(hasStoredNickname(storageWith('   '))).toBe(false)
+    const storage = fakeStorage()
+    saveNickname(storage, '   ')
+    expect(hasStoredNickname(storage)).toBe(false)
   })
 
   it('is true once a real name is stored', () => {
-    expect(hasStoredNickname(storageWith('zebra'))).toBe(true)
+    const storage = fakeStorage()
+    saveNickname(storage, 'zebra')
+    expect(hasStoredNickname(storage)).toBe(true)
   })
 
   // Someone who deliberately typed "friend" has chosen a name, and must not be
-  // prompted again every time they open a room.
+  // prompted again every time they open a room. This is the case that makes
+  // `hasStoredNickname` a different question from `loadNickname`, rather than a
+  // convenience wrapper around it.
   it('is true when the stored value happens to equal the default', () => {
-    expect(hasStoredNickname(storageWith(DEFAULT_NICKNAME))).toBe(true)
+    const storage = fakeStorage()
+    saveNickname(storage, DEFAULT_NICKNAME)
+    expect(hasStoredNickname(storage)).toBe(true)
   })
 
   it('is false when storage throws', () => {
@@ -552,13 +562,7 @@ describe('hasStoredNickname', () => {
 })
 ```
 
-Add `hasStoredNickname` and `DEFAULT_NICKNAME` to the existing import at the top of the file. Reuse the file's existing storage-stub helper if there is one; if not, add:
-
-```ts
-function storageWith(value: string | null): NicknameStorage {
-  return {getItem: () => value, setItem: () => {}}
-}
-```
+Add `hasStoredNickname` to the existing import on line 2; `DEFAULT_NICKNAME` and `saveNickname` are already imported.
 
 - [ ] **Step 2: Run it and watch it fail**
 

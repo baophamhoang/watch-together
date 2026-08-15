@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest'
 import {
   CORRECTION_COOLDOWN_MS,
+  MAX_BACKOFF_STEPS,
   decideCorrection,
   expectedPosition,
   type CorrectionInput,
@@ -14,6 +15,8 @@ const base: CorrectionInput = {
   lastCorrectionAt: null,
   lastSeekAt: null,
   seekLatencyMs: 300,
+  playerState: 'playing',
+  consecutiveCorrections: 0,
 }
 
 describe('expectedPosition', () => {
@@ -41,7 +44,8 @@ describe('decideCorrection', () => {
   })
 
   it('corrects just outside the dead zone', () => {
-    expect(decideCorrection({...base, actual: 99.4}).kind).toBe('seek')
+    // DEAD_ZONE_S is 1.5; 98.4 is a drift of 1.6, just past the boundary.
+    expect(decideCorrection({...base, actual: 98.4}).kind).toBe('seek')
   })
 
   it('adds lead compensation when playing', () => {
@@ -55,7 +59,8 @@ describe('decideCorrection', () => {
   })
 
   it('flags small corrections as not resyncing', () => {
-    const result = decideCorrection({...base, actual: 99})
+    // Drift of 2: past the 1.5 dead zone but under the 3s resync threshold.
+    const result = decideCorrection({...base, actual: 98})
     expect(result).toMatchObject({kind: 'seek', resyncing: false})
   })
 
@@ -85,5 +90,72 @@ describe('decideCorrection', () => {
       lastCorrectionAt: base.nowLocal - (CORRECTION_COOLDOWN_MS + 100),
     })
     expect(result.kind).toBe('seek')
+  })
+})
+
+describe('decideCorrection — network awareness', () => {
+  // The spiral this exists to break: a seek causes buffering, buffering stops
+  // `actual` advancing while `expected` keeps running on the clock, so drift
+  // grows and triggers another seek. Correcting while buffering measures the
+  // network, not the drift.
+  it('never corrects while the player is buffering', () => {
+    expect(
+      decideCorrection({...base, playerState: 'buffering', expected: 100, actual: 0}),
+    ).toEqual({kind: 'none'})
+  })
+
+  it('never corrects before the player has started', () => {
+    expect(
+      decideCorrection({...base, playerState: 'unstarted', expected: 100, actual: 0}),
+    ).toEqual({kind: 'none'})
+  })
+
+  it('still corrects a paused player, which is a legitimate steady state', () => {
+    const out = decideCorrection({
+      ...base,
+      playerState: 'paused',
+      isPlaying: false,
+      expected: 100,
+      actual: 0,
+    })
+    expect(out.kind).toBe('seek')
+  })
+
+  // Each unsuccessful correction doubles the wait. A guest that cannot keep up
+  // should give up gracefully rather than seek every three seconds forever.
+  it('backs off exponentially while corrections are not landing', () => {
+    const at = (consecutiveCorrections: number, sinceMs: number) =>
+      decideCorrection({
+        ...base,
+        consecutiveCorrections,
+        expected: 100,
+        actual: 0,
+        nowLocal: base.nowLocal,
+        lastCorrectionAt: base.nowLocal - sinceMs,
+      }).kind
+
+    expect(at(0, 3500)).toBe('seek')
+    expect(at(1, 3500)).toBe('none')
+    expect(at(1, 6500)).toBe('seek')
+    expect(at(2, 6500)).toBe('none')
+    expect(at(2, 12500)).toBe('seek')
+  })
+
+  it('caps the backoff rather than growing without bound', () => {
+    const out = decideCorrection({
+      ...base,
+      consecutiveCorrections: 99,
+      expected: 100,
+      actual: 0,
+      lastCorrectionAt: base.nowLocal - (CORRECTION_COOLDOWN_MS * 2 ** MAX_BACKOFF_STEPS + 500),
+    })
+    expect(out.kind).toBe('seek')
+  })
+
+  // The old dead zone was 0.5s, below YouTube's own reporting granularity, so
+  // it fired on noise. A tolerance must exceed the noise floor of the thing it
+  // measures.
+  it('tolerates drift that is real but not worth a seek', () => {
+    expect(decideCorrection({...base, expected: 101, actual: 100}).kind).toBe('none')
   })
 })

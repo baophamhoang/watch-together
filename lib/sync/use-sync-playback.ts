@@ -12,6 +12,7 @@ const LANDED_TOLERANCE_S = 0.5
 
 export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
   const lastCorrectionAt = useRef<number | null>(null)
+  const consecutiveCorrections = useRef(0)
   const lastSeekAt = useRef<number | null>(null)
   const seekLatencyMs = useRef(DEFAULT_SEEK_LATENCY_MS)
   const inFlightSeek = useRef<{target: number; startedAt: number} | null>(null)
@@ -110,9 +111,17 @@ export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
         lastCorrectionAt: lastCorrectionAt.current,
         lastSeekAt: lastSeekAt.current,
         seekLatencyMs: seekLatencyMs.current,
+        playerState: handle.getState(),
+        consecutiveCorrections: consecutiveCorrections.current,
       })
 
       if (correction.kind === 'none') {
+        // A settled player inside the dead zone is the definition of caught up.
+        // Buffering ticks also return 'none', and must NOT reset the streak —
+        // that would restart the doubling every time the network hiccuped and
+        // reintroduce the loop this exists to break.
+        const settled = handle.getState() === 'playing' || handle.getState() === 'paused'
+        if (settled) consecutiveCorrections.current = 0
         // Same-value updates bail out of a re-render (React dedupes via
         // Object.is), so this is safe to call unconditionally — and it must
         // be unconditional: `resyncing` is deliberately not a dependency
@@ -124,6 +133,7 @@ export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
       handle.seekTo(correction.to)
       lastCorrectionAt.current = now
       lastSeekAt.current = now
+      consecutiveCorrections.current += 1
       inFlightSeek.current = {target: correction.to, startedAt: now}
       setResyncing(correction.resyncing)
     }, CHECK_INTERVAL_MS)

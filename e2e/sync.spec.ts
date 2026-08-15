@@ -236,3 +236,89 @@ test('a link-joiner is prompted for a name, and a stray blur does not commit "fr
   await page.reload()
   await expect(page.getByTestId('name-input')).toBeVisible()
 })
+
+test('a guest refreshing does not disturb the room', async ({browser}) => {
+  const hostContext = await browser.newContext()
+  const guestContext = await browser.newContext()
+  const host = await hostContext.newPage()
+  const guest = await guestContext.newPage()
+
+  const room = await startRoom(host, 'host')
+  await joinRoom(guest, 'guest', room)
+  await expect(host.getByTestId('status')).toContainText('2 watching')
+
+  await host.getByTestId('add-url').fill(VIDEO_URL)
+  await host.getByTestId('add-submit').click()
+  await expect(guest.getByTestId('queue-item')).toHaveCount(1)
+
+  await guest.reload()
+
+  // The queue must survive on BOTH sides. The defect this guards against
+  // destroyed it on the host, not the peer that refreshed.
+  await expect(guest.getByTestId('queue-item')).toHaveCount(1)
+  await expect(host.getByTestId('queue-item')).toHaveCount(1)
+  await expect(host.getByTestId('status')).toContainText('2 watching')
+
+  await hostContext.close()
+  await guestContext.close()
+})
+
+test('the room survives repeated guest refreshes', async ({browser}) => {
+  const hostContext = await browser.newContext()
+  const guestContext = await browser.newContext()
+  const host = await hostContext.newPage()
+  const guest = await guestContext.newPage()
+
+  const room = await startRoom(host, 'host')
+  await joinRoom(guest, 'guest', room)
+  // `joinRoom` only waits for the room code to render, not for the peers to
+  // find each other. Adding a track before both sides are connected sends an
+  // intent into a room that has no host yet, and it is simply lost — a test
+  // failure with nothing to do with what this test is about.
+  await expect(host.getByTestId('status')).toContainText('2 watching')
+
+  await host.getByTestId('add-url').fill(VIDEO_URL)
+  await host.getByTestId('add-submit').click()
+  await expect(guest.getByTestId('queue-item')).toHaveCount(1)
+
+  // Each refresh was an independent coin flip on peer id, so one is a weak
+  // test. Three makes a surviving bug overwhelmingly likely to show.
+  for (let i = 0; i < 3; i++) {
+    await guest.reload()
+    await expect(guest.getByTestId('queue-item')).toHaveCount(1)
+    await expect(host.getByTestId('queue-item')).toHaveCount(1)
+  }
+
+  await hostContext.close()
+  await guestContext.close()
+})
+
+test('a third peer joining late receives the existing queue', async ({browser}) => {
+  const hostContext = await browser.newContext()
+  const guestContext = await browser.newContext()
+  const laterContext = await browser.newContext()
+  const host = await hostContext.newPage()
+  const guest = await guestContext.newPage()
+  const later = await laterContext.newPage()
+
+  const room = await startRoom(host, 'host')
+  await joinRoom(guest, 'guest', room)
+  // See the note in the repeated-refresh test: `joinRoom` returns before the
+  // peers have found each other, and an intent sent into a hostless room is
+  // lost rather than queued.
+  await expect(host.getByTestId('status')).toContainText('2 watching')
+
+  await host.getByTestId('add-url').fill(VIDEO_URL)
+  await host.getByTestId('add-submit').click()
+  await expect(guest.getByTestId('queue-item')).toHaveCount(1)
+
+  // Nothing in the suite covered a third peer, and a late joiner is the case
+  // the claim timer got wrong.
+  await joinRoom(later, 'later', room)
+  await expect(later.getByTestId('queue-item')).toHaveCount(1)
+  await expect(host.getByTestId('status')).toContainText('3 watching')
+
+  await hostContext.close()
+  await guestContext.close()
+  await laterContext.close()
+})

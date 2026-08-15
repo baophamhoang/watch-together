@@ -40,7 +40,13 @@ export function NameBadge({
   const [prevStartEditing, setPrevStartEditing] = useState(startEditing)
   if (startEditing !== prevStartEditing) {
     setPrevStartEditing(startEditing)
-    if (startEditing) setEditing(true)
+    if (startEditing) {
+      setEditing(true)
+      // The button path does setDraft(name) on the way in. This path is the
+      // first-run prompt, where the "current name" is a placeholder nobody
+      // chose — empty so the placeholder shows and typing does not append.
+      setDraft('')
+    }
   }
 
   useEffect(() => {
@@ -61,6 +67,9 @@ export function NameBadge({
     return (
       <button
         onClick={() => {
+          // Deliberate rename, not first-run: prefill with the current name.
+          // Counterpart is the first-run branch above, which seeds an empty
+          // draft instead — keep both in sync if you touch either.
           setDraft(name)
           setEditing(true)
         }}

@@ -1,4 +1,5 @@
 import {expect, test, type Page} from '@playwright/test'
+import {generateRoomCode} from '@/lib/room-code'
 
 const VIDEO_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
 const SECOND_VIDEO_URL = 'https://www.youtube.com/watch?v=9bZkp7q19f0'
@@ -181,4 +182,45 @@ test('a malformed link is rejected without touching the queue', async ({page}) =
   await page.getByTestId('add-submit').click()
   await expect(page.getByText('That is not a YouTube link.')).toBeVisible()
   await expect(page.getByTestId('queue-item')).toHaveCount(0)
+})
+
+test('a link-joiner is prompted for a name, and a stray blur does not commit "friend"', async ({
+  page,
+}) => {
+  // Deliberately not startRoom/joinRoom: both call saveNickname on the way
+  // in, which is exactly what makes the first-run prompt never open in every
+  // other test in this file. Reaching a room without ever touching the
+  // landing page is what an invite-link recipient actually does, and it is
+  // the only way to exercise `needsName` at all. Generated, not hardcoded —
+  // a fixed code names a real, discoverable room (see the comment on
+  // startRoom above), and the landing page's placeholder is exactly such a
+  // code.
+  const room = generateRoomCode()
+  await page.goto(`/r/${room}`)
+
+  const nameInput = page.getByTestId('name-input')
+  await expect(nameInput).toBeVisible()
+  await expect(nameInput).toHaveValue('')
+  await expect(nameInput).toHaveAttribute('placeholder', 'Your name')
+  await expect(nameInput).toBeFocused()
+
+  // The realistic trigger, per the finding this test exists to cover: tapping
+  // the video gate to start playback, not deliberately dismissing the name
+  // prompt. Any click elsewhere blurs the input the same way; this is the one
+  // an actual first-run visitor reaches for.
+  await page.getByTestId('tap-to-watch').click()
+
+  // Mirrors the unexported KEY in lib/identity.ts. Reading storage directly,
+  // rather than only re-checking the prompt below, is what would have caught
+  // the original bug: it wrote the literal word "friend" here on every stray
+  // blur, and a behavioural check alone could pass for the wrong reason.
+  const stored = await page.evaluate(() =>
+    window.localStorage.getItem('watch-together:nickname'),
+  )
+  expect(stored).toBeNull()
+
+  // A commit would have made hasStoredNickname true, and the prompt would not
+  // reopen on the next visit. It must still be here after a reload.
+  await page.reload()
+  await expect(page.getByTestId('name-input')).toBeVisible()
 })

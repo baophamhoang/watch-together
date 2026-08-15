@@ -71,10 +71,20 @@ The scaffold's light/dark `:root` blocks and its two `body` rules go. This app i
   --bg: #0b0b0c;
   --surface: #151517;
   --surface-raised: #1e1e21;
+
+  /* Two border roles, and picking the wrong one is an accessibility bug.
+     --border is DECORATIVE: dividers and separators, where the thing either
+     side is already identifiable without it. At 1.3:1 it is intentionally
+     quiet and WCAG 1.4.11 does not apply to it.
+     --border-strong is STRUCTURAL: the boundary of a control you could not
+     otherwise locate — text inputs above all, since --surface on --bg is only
+     1.07:1, so the fill alone does not show you where the field is. Measured
+     3.5:1 against --surface and 3.7:1 against --bg, clearing the 3:1 floor. */
   --border: #2a2a2f;
+  --border-strong: #6b6b73;
 
   /* Text. Contrast measured against --bg:
-     --text 17.1:1, --text-muted 7.6:1, --text-subtle 5.8:1.
+     --text 17.9:1, --text-muted 7.7:1, --text-subtle 5.8:1.
      All clear the 4.5:1 AA floor for body text, so any of the three is
      safe on any surface here. Nothing dimmer than --text-subtle exists,
      deliberately — there is no token available to fail with. */
@@ -104,6 +114,7 @@ The scaffold's light/dark `:root` blocks and its two `body` rules go. This app i
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-text: var(--text);
   --color-muted: var(--text-muted);
   --color-subtle: var(--text-subtle);
@@ -129,7 +140,7 @@ body {
 
 /* Every interactive element gets a visible focus ring. The default outline
    disappears against a dark surface. */
-:where(button, a, input, [tabindex]):focus-visible {
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
   outline: 2px solid var(--live);
   outline-offset: 2px;
 }
@@ -184,7 +195,7 @@ export function RoomTabs({
 
   const tabClass = (active: boolean) =>
     [
-      'flex flex-1 items-center justify-center gap-2 py-3 text-sm font-medium',
+      'flex flex-1 items-center justify-center gap-[var(--space-2)] py-[var(--space-3)] text-sm font-medium',
       'border-b-2 transition-colors cursor-pointer',
       active
         ? 'border-live text-text'
@@ -196,6 +207,8 @@ export function RoomTabs({
       <div role="tablist" className="flex border-b border-border">
         <button
           role="tab"
+          id="tab-queue"
+          aria-controls="panel-queue"
           aria-selected={tab === 'queue'}
           onClick={() => setTab('queue')}
           className={tabClass(tab === 'queue')}
@@ -205,6 +218,8 @@ export function RoomTabs({
         </button>
         <button
           role="tab"
+          id="tab-chat"
+          aria-controls="panel-chat"
           aria-selected={tab === 'chat'}
           onClick={() => setTab('chat')}
           className={tabClass(tab === 'chat')}
@@ -213,7 +228,7 @@ export function RoomTabs({
           Chat
           {unreadCount > 0 && tab !== 'chat' && (
             <span
-              className="rounded-[var(--radius-full)] bg-live px-1.5 text-xs font-semibold text-bg"
+              className="rounded-[var(--radius-full)] bg-live px-[var(--space-2)] text-xs font-semibold text-bg"
               aria-label={`${unreadCount} unread messages`}
             >
               {unreadCount > 9 ? '9+' : unreadCount}
@@ -222,7 +237,16 @@ export function RoomTabs({
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto" role="tabpanel">
+      {/* One panel whose identity follows the selected tab, rather than two
+          panels toggled by hidden. Either satisfies the APG; this keeps the
+          scroll container single so switching tabs does not resurrect a stale
+          scroll position from the other one. */}
+      <div
+        className="min-h-0 flex-1 overflow-y-auto"
+        role="tabpanel"
+        id={tab === 'queue' ? 'panel-queue' : 'panel-chat'}
+        aria-labelledby={tab === 'queue' ? 'tab-queue' : 'tab-chat'}
+      >
         {tab === 'queue' ? queue : chat}
       </div>
     </div>
@@ -607,22 +631,15 @@ Add state and a roster-diff effect alongside the existing hooks:
   )
 ```
 
-Render `<Toasts items={toasts} onDismiss={dismissToast} />` as the last child of `<main>`, and put the presence bar in the rail header — which Task 4 builds. Until then, place it above `RoomTabs`:
+Render `<Toasts items={toasts} onDismiss={dismissToast} />` as the last child of `<main>`.
+
+The rail already opens with a header row carrying the room code and the status text — Task 2 preserved it because the end-to-end suite depends on both test ids. **Add the presence bar into that existing row rather than creating a second one**, between the code and the status:
 
 ```tsx
-<div className="flex items-center justify-between gap-[var(--space-3)] border-b border-border px-[var(--space-3)] py-[var(--space-2)]">
-  <PresenceBar roster={room.roster} selfId={room.selfId} />
-  <span className="text-xs text-muted" data-testid="status">
-    {room.status === 'connected'
-      ? `${room.roster.length} watching${room.isHost ? ' · host' : ''}`
-      : room.status === 'blocked'
-        ? 'network blocked'
-        : 'connecting…'}
-  </span>
-</div>
+<PresenceBar roster={room.roster} selfId={room.selfId} />
 ```
 
-Keep `data-testid="status"` and its exact text — the e2e suite asserts `2 watching` against it.
+Leave `data-testid="room-code"` and `data-testid="status"` exactly as they are, including the status string — the suite asserts `2 watching` against it. Task 4 replaces this whole row with a designed invite bar; for now it is a plain row that gains an avatar stack.
 
 - [ ] **Step 8: Verify**
 
@@ -692,9 +709,12 @@ export function InviteBar({
 
   return (
     <div className="flex shrink-0 items-center justify-between gap-[var(--space-3)] border-b border-border px-[var(--space-3)] py-[var(--space-2)]">
-      <div className="flex min-w-0 items-center gap-[var(--space-2)]">
+      {/* `min-w-0` on both groups, and `shrink-0` on the presence stack below,
+          so a room with many peers squeezes the code rather than shunting the
+          status text off the edge. */}
+      <div className="flex min-w-0 flex-1 items-center gap-[var(--space-2)]">
         <code
-          className="truncate text-sm font-medium tracking-wide text-text"
+          className="min-w-0 truncate text-sm font-medium tracking-wide text-text"
           data-testid="room-code"
         >
           {code}
@@ -731,7 +751,7 @@ The copied state says "Invite link copied" because the button copies the **whole
 
 - [ ] **Step 2: Replace the placeholder header in `Room.tsx`**
 
-Delete the temporary header block added in Task 3 Step 7 and put `InviteBar` in its place, as the first child of `<aside>`:
+Replace the rail's whole header row — the one carrying the room code, the presence bar and the status text — with `InviteBar`, as the first child of `<aside>`. `InviteBar` renders all three itself, including both test ids, so nothing is lost:
 
 ```tsx
 <InviteBar
@@ -938,7 +958,7 @@ export function ChatComposer({
         placeholder="Message"
         aria-label="Message"
         data-testid="chat-input"
-        className="min-w-0 flex-1 rounded-[var(--radius-md)] bg-surface px-[var(--space-3)] py-[var(--space-2)] text-sm text-text placeholder:text-subtle"
+        className="min-w-0 flex-1 rounded-[var(--radius-md)] border border-border-strong bg-surface px-[var(--space-3)] py-[var(--space-2)] text-sm text-text placeholder:text-subtle"
       />
       {gifSlot}
       <button
@@ -1031,14 +1051,16 @@ export function ChatPanel({
 
 - [ ] **Step 9: Wire unread counting**
 
-In `components/RoomTabs.tsx`, add an optional `onChatOpened?: () => void` prop and call it when the chat tab is selected:
+In `components/RoomTabs.tsx`, add an optional `onTabChange?: (tab: 'queue' | 'chat') => void` prop. It reports **which** tab is now showing, not merely that chat was opened once — the consumer needs to know when the user leaves chat as well, or the unread badge can never re-arm.
 
 ```tsx
-onClick={() => {
-  setTab('chat')
-  onChatOpened?.()
-}}
+const select = (next: 'queue' | 'chat') => {
+  setTab(next)
+  onTabChange?.(next)
+}
 ```
+
+Both tab buttons call `select('queue')` / `select('chat')` instead of `setTab` directly.
 
 In `Room.tsx`, track unread messages and reset on open:
 
@@ -1054,7 +1076,16 @@ In `Room.tsx`, track unread messages and reset on open:
   }, [room.messages.length])
 ```
 
-Pass `unreadCount={unread}` and `onChatOpened={() => { chatOpen.current = true; setUnread(0) }}` to `RoomTabs`, and replace the placeholder chat node with:
+Pass `unreadCount={unread}` and a handler that tracks the current tab in both directions, so returning to the queue re-arms the badge:
+
+```tsx
+onTabChange={next => {
+  chatOpen.current = next === 'chat'
+  if (next === 'chat') setUnread(0)
+}}
+```
+
+Replace the placeholder chat node with:
 
 ```tsx
 chat={
@@ -1280,19 +1311,29 @@ export function GifPicker({onPick}: {onPick(url: string): void}) {
   const [gifs, setGifs] = useState<Gif[]>([])
   const [error, setError] = useState<string | null>(null)
 
+  // Derived, not stored. An empty query shows nothing, and that is a function
+  // of `query` at render time — writing `setGifs([])` in the effect instead
+  // would cost an extra render and need a lint suppression to boot.
+  const trimmedQuery = query.trim()
+  const visibleGifs = trimmedQuery ? gifs : []
+
   useEffect(() => {
-    if (!open) return
-    const trimmed = query.trim()
-    if (!trimmed) {
-      setGifs([])
-      return
-    }
-    // Debounced: the free tier allows 100 searches an hour, so a request per
-    // keystroke would exhaust it in about a minute of typing.
+    if (!open || !trimmedQuery) return
+
+    // Aborting matters twice over: it stops a superseded response from landing
+    // after a newer one and repainting the grid with results for a query the
+    // user has moved on from, and it actually cancels the request, which the
+    // free tier's 100-searches-an-hour ceiling makes worth doing.
+    const controller = new AbortController()
+
+    // Debounced: a request per keystroke would exhaust that quota in about a
+    // minute of typing.
     const timer = setTimeout(async () => {
       setError(null)
       try {
-        const response = await fetch(`/api/gifs?q=${encodeURIComponent(trimmed)}`)
+        const response = await fetch(`/api/gifs?q=${encodeURIComponent(trimmedQuery)}`, {
+          signal: controller.signal,
+        })
         if (!response.ok) {
           setError(
             response.status === 429
@@ -1303,13 +1344,19 @@ export function GifPicker({onPick}: {onPick(url: string): void}) {
           return
         }
         setGifs((await response.json()).gifs ?? [])
-      } catch {
+      } catch (cause) {
+        // An abort is us superseding our own request, not a failure to report.
+        if ((cause as Error | undefined)?.name === 'AbortError') return
         setError('GIF search is unavailable.')
         setGifs([])
       }
     }, 400)
-    return () => clearTimeout(timer)
-  }, [open, query])
+
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [open, trimmedQuery])
 
   return (
     <div className="relative shrink-0">
@@ -1331,13 +1378,13 @@ export function GifPicker({onPick}: {onPick(url: string): void}) {
             onChange={e => setQuery(e.target.value)}
             placeholder="Search GIFs"
             aria-label="Search GIFs"
-            className="w-full rounded-[var(--radius-md)] bg-surface-raised px-[var(--space-3)] py-[var(--space-2)] text-sm text-text placeholder:text-subtle"
+            className="w-full rounded-[var(--radius-md)] border border-border-strong bg-surface-raised px-[var(--space-3)] py-[var(--space-2)] text-sm text-text placeholder:text-subtle"
           />
 
           {error && <p className="p-[var(--space-2)] text-sm text-warn">{error}</p>}
 
           <div className="mt-[var(--space-2)] grid max-h-64 grid-cols-3 gap-[var(--space-1)] overflow-y-auto">
-            {gifs.map(gif => (
+            {visibleGifs.map(gif => (
               <button
                 key={gif.id}
                 onClick={() => {
@@ -1406,10 +1453,32 @@ Phones block programmatic playback, so a joiner's player never starts and the dr
 **Files:**
 - Create: `components/TapToWatch.tsx`
 - Modify: `components/Room.tsx`
+- Modify: `app/globals.css`
 
 **Interfaces:**
 - Consumes: `PlayerHandle` from `lib/youtube/use-player.ts`
 - Produces: `<TapToWatch onActivate />`
+
+- [ ] **Step 0: Define the scrim token**
+
+Three overlays now dim the player — `loadError`, `localBlock` and this gate —
+and all three reached for a raw `bg-black/8x`, which the token rule forbids.
+One token, defined once and used by all three, is the fix; converting only the
+new one would leave the file less consistent than it started.
+
+In `app/globals.css`, beside the other colour tokens:
+
+```css
+  /* Dims the video behind any overlay that needs to be read over it. Not a
+     surface — it is always composited over unknown video frames, which is
+     why it is an alpha rather than one of the flat surface colours. */
+  --scrim: rgb(0 0 0 / 0.85);
+```
+
+Then in `components/Room.tsx`, replace `bg-black/85` on **both** existing
+`PlayerOverlay` backdrops with `bg-[var(--scrim)]`. The new gate uses the same
+token, so all three match at 0.85 — slightly darker than the gate's original
+0.80, which only helps the text contrast over a bright frame.
 
 - [ ] **Step 1: Write the gate**
 
@@ -1425,13 +1494,25 @@ export function TapToWatch({onActivate}: {onActivate(): void}) {
     <button
       onClick={onActivate}
       data-testid="tap-to-watch"
-      className="absolute inset-0 flex flex-col items-center justify-center gap-[var(--space-3)] bg-black/80 cursor-pointer"
+      // Without an explicit label the accessible name is built from every
+      // descendant text node, so this button announces as "Tap to watch
+      // Browsers need one tap before they will start a video with sound."
+      // — one run-on string, on the single most important control a phone
+      // joiner meets. `aria-label` wins over name-from-content, and
+      // `aria-describedby` keeps the explanation as a description rather
+      // than discarding it.
+      aria-label="Tap to watch"
+      aria-describedby="tap-to-watch-hint"
+      className="absolute inset-0 flex flex-col items-center justify-center gap-[var(--space-3)] bg-[var(--scrim)] cursor-pointer"
     >
       <span className="flex h-16 w-16 items-center justify-center rounded-[var(--radius-full)] bg-text text-bg">
         <Play size={28} aria-hidden />
       </span>
       <span className="text-sm text-text">Tap to watch</span>
-      <span className="max-w-xs px-[var(--space-4)] text-center text-xs text-muted">
+      <span
+        id="tap-to-watch-hint"
+        className="max-w-xs px-[var(--space-4)] text-center text-xs text-muted"
+      >
         Browsers need one tap before they will start a video with sound.
       </span>
     </button>
@@ -1450,18 +1531,36 @@ Add state and render the gate over the player until it is dismissed:
 Inside the player shell, after the existing overlays:
 
 ```tsx
-{!activated && !loadError && (
+{/* Suppressed alongside the other two overlays rather than stacked on top
+    of them: this renders last, so an un-suppressed gate would sit above
+    the unplayable overlay and swallow its "Skip for everyone" button. */}
+{!activated && !loadError && !localBlock && (
   <TapToWatch
     onActivate={() => {
+      // A tap before the IFrame API has finished loading must not dismiss
+      // the gate. `handle` is null across a real network round trip, and
+      // the gate is the largest thing on screen from first paint, so an
+      // early tap is likely on exactly the slow mobile connections this
+      // feature exists for. Dismissing on that tap would strand the user:
+      // the gate never returns (`activated` is one-way), and the play()
+      // that useSyncPlayback issues once the handle appears comes from an
+      // effect, carries no user activation, and is blocked by the very
+      // policy this gate exists to satisfy — leaving a dead player with
+      // no affordance and nothing on screen suggesting a reload.
+      if (!handle) return
       setActivated(true)
       // Called inside the click handler so it runs under a real user
       // gesture — that activation is exactly what the autoplay policy
       // requires, and it does not survive an async hop.
-      handle?.play()
+      handle.play()
     }}
   />
 )}
 ```
+
+Returning early leaves the gate up, so the next tap is its own fresh, valid gesture. It stays fully synchronous: no `await`, no timer, nothing between the click and `play()`.
+
+The gate stays up until it is tapped, which is what makes an empty room work: a user who arrives before any video exists adds one from the rail, the gate is still covering the player, and their tap both dismisses it and starts playback under a real gesture. Deferring the gate until a track existed would move the tap to the worst possible moment.
 
 - [ ] **Step 3: Verify on a narrow viewport**
 
@@ -1489,10 +1588,77 @@ The last surfaces still wearing the placeholder styling. This is also the access
 - Modify: `components/AddTrackForm.tsx`
 - Modify: `app/page.tsx`
 - Modify: `app/layout.tsx`
+- Modify: `components/Room.tsx` (mobile layout fix, Step 0)
+- Modify: `components/PresenceBar.tsx`, `components/Toasts.tsx`, `components/GifPicker.tsx` (routed fixes, Step 6)
 
 **Interfaces:**
 - Consumes: tokens from Task 1
 - Produces: nothing new
+
+- [ ] **Step 0: Fix the mobile layout void**
+
+Found during Task 7's phone verification. On a phone the rail is crushed and a
+band of dead black sits above it, which is the opposite of the intended
+priority: the video and the bar need only their natural height, and every
+remaining pixel belongs to chat and the queue.
+
+`<main>` is `flex-col` below `lg`. The `<section>` holding the player carries
+`flex-1`, so it claims all the free space even though both its children are
+`shrink-0` and total roughly 270px; the `<aside>` has no `flex-1` and its
+`min-h-0` lets it shrink under its own content. Swap which one grows, per
+breakpoint.
+
+In `components/Room.tsx`, the section becomes:
+
+```tsx
+      <section className="flex min-w-0 flex-col lg:flex-1">
+```
+
+and the aside becomes:
+
+```tsx
+      <aside className="flex min-h-0 w-full flex-1 flex-col border-border lg:w-[380px] lg:flex-none lg:border-l">
+```
+
+`lg:flex-none` is doing real work: without it the `flex-1` would keep applying
+at desktop widths and fight the fixed `lg:w-[380px]`. It also replaces the old
+`lg:shrink-0`, which `flex-none` already implies.
+
+Verify at 390px that the rail fills everything below the now-playing bar with
+no black gap, and at `lg` that the player still grows and the rail holds its
+380px.
+
+Stacking is wrong in landscape, though, and fixing only the portrait case
+leaves the sibling failure: at 844×390 the `aspect-video` player is taller than
+the entire viewport, so the section eats everything and `min-h-0` lets the rail
+go to **0px** — chat and queue vanish outright. Width is the wrong
+discriminator here (a landscape phone is 844px wide, just under `lg`, while a
+portrait tablet is 768px wide and genuinely wants stacking); the real question
+is whether there is vertical room to stack, which is what `landscape:`
+expresses. Add it alongside every `lg:` in the layout chain:
+
+```tsx
+<main className="flex h-dvh flex-col landscape:flex-row lg:flex-row">
+```
+
+```tsx
+<div className="yt-player-shell relative aspect-video w-full shrink-0 bg-black landscape:aspect-auto landscape:flex-1 lg:aspect-auto lg:flex-1" />
+```
+
+```tsx
+<section className="flex min-w-0 flex-col landscape:flex-1 lg:flex-1">
+```
+
+```tsx
+<aside className="flex min-h-0 w-full flex-1 flex-col border-border landscape:w-[380px] landscape:flex-none landscape:border-l lg:w-[380px] lg:flex-none lg:border-l">
+```
+
+At 844×390 that gives a 464px-wide player at 261px tall inside 390px of height,
+with the rail at its full 380px — cramped but complete. Desktop is unaffected:
+it is already landscape *and* `lg`, so both variants agree.
+
+Verify at 844×390 that the rail is present and non-zero, and re-check 390×844
+afterwards to confirm the portrait case did not regress.
 
 - [ ] **Step 1: Rebuild the queue rows**
 
@@ -1543,17 +1709,73 @@ Row:
 
 - [ ] **Step 2: Restyle the add form and the landing page**
 
-In `AddTrackForm.tsx` and `app/page.tsx`, replace every `rounded-lg`, `border-neutral-*`, `bg-neutral-*` and `text-neutral-*` with the token equivalents (`rounded-[var(--radius-md)]`, `border-border`, `bg-surface`, `text-text` / `text-muted`). Error text uses `text-danger`. Keep every `data-testid`, the label text "Your name", the button labels "Start a room" and "Join", and the placeholder `word-word-abcd` — the e2e suite resolves elements by all of them.
+In `AddTrackForm.tsx` and `app/page.tsx`, replace every `rounded-lg`, `border-neutral-*`, `bg-neutral-*` and `text-neutral-*` with the token equivalents (`rounded-[var(--radius-md)]`, `border-border`, `bg-surface`, `text-text` / `text-muted`). Error text uses `text-danger`.
+
+**Every text input takes `border border-border-strong`, not `border-border`.** `--surface` against `--bg` is only 1.07:1, so a filled field with a decorative border is effectively invisible — the strong border is the only thing that shows someone where to type, and it is the token measured to clear the 3:1 boundary floor. That applies to the nickname field, the room-code field, and the add-URL field. Keep every `data-testid`, the label text "Your name", the button labels "Start a room" and "Join", and the placeholder `word-word-abcd` — the e2e suite resolves elements by all of them.
+
+- [ ] **Step 2b: Close three accessibility and token gaps found reviewing earlier tasks**
+
+**`components/PresenceBar.tsx`** — wrap the initial so it is not announced alongside the name. A screen reader concatenates both text nodes today, so each avatar is read out twice — once as the glyph, once as the real name:
+
+```tsx
+<span aria-hidden="true">{initial}</span>
+<span className="sr-only">{isSelf ? `${entry.name}, you` : entry.name}</span>
+```
+
+Also bring its spacing onto the token scale: `-space-x-2` becomes `-space-x-[var(--space-2)]`, matching how the sibling `Toasts.tsx` spaces its items. Leave `h-8 w-8` and `border-2` — those are sizes, and no size token exists.
+
+**`components/Toasts.tsx`** — `shadow-black/40` is a raw colour. Swap the shadow for `border border-border`, which is a token and reads better against a dark surface anyway.
+
+**`components/GifPicker.tsx`** — three gaps, all from its own brief:
+
+- `shadow-xl shadow-black/50` on the popover is a raw colour. Replace the shadow with `border border-border`, matching what `Toasts` now does.
+- The popover has no keyboard dismissal and does not return focus. Add an `Escape` handler that closes it and moves focus back to the toggle, since when a chosen GIF's button unmounts, focus otherwise falls to `document.body` and a keyboard user loses their place entirely:
+
+```tsx
+const toggleRef = useRef<HTMLButtonElement | null>(null)
+
+const close = () => {
+  setOpen(false)
+  toggleRef.current?.focus()
+}
+```
+
+Attach `ref={toggleRef}` to the toggle button, call `close()` after picking a GIF instead of `setOpen(false)`, and put `onKeyDown={e => { if (e.key === 'Escape') close() }}` on the popover container.
+
+- `alt={gif.title || 'GIF'}` announces every untitled result identically, so a screen-reader user tabbing the grid hears "GIF, GIF, GIF". Fall back to a positional name instead: `alt={gif.title || \`GIF ${index + 1}\`}`, taking `index` from the `map` callback.
 
 - [ ] **Step 3: Check for token violations**
 
 Run:
 
 ```bash
-grep -rn "neutral-\|slate-\|gray-\|rounded-lg\|rounded-xl" components/ app/ --include=*.tsx
+grep -rnE "(bg|text|border|ring|shadow|fill|stroke|divide|from|to|via|placeholder|accent|caret|outline|decoration)-(neutral|slate|gray|zinc|stone)-|rounded-(sm|md|lg|xl|2xl|3xl|full)\b|(bg|text|border|shadow|ring)-(black|white)/" components/ app/ --include="*.tsx"
 ```
 
+Then the spacing sweep, which is a separate pattern because spacing and colour
+fail differently — a raw colour is wrong, a raw gap is merely unanchored:
+
+```bash
+grep -rnE "(^|[\"' ])-?(m|p)[trblxyse]?-[0-9]|(^|[\"' ])(gap|space)(-[xy])?-[0-9]" components/ app/ --include="*.tsx"
+```
+
+Expected: no output, with the single documented exemption below. This pattern
+deliberately keys on a leading quote or space so it matches utility names and
+not fragments: `inset-0`, `right-0`, `left-1/2`, `max-w-md`, `min-w-0`,
+`max-h-48` and the already-correct `-space-x-[var(--space-2)]` all pass it
+untouched.
+
 Expected: no output. Anything listed is a leftover to convert.
+
+Three things about that command, each of which cost a run to find:
+
+- `--include="*.tsx"` **must stay quoted.** Unquoted, zsh expands it against the current directory and the whole command dies with `no matches found` before grep ever runs — a verification step that silently fails to verify.
+- The colour half is anchored to a utility prefix rather than matching the palette name loosely. A bare `slate-` matches `tran`**`slate-`**`x-1/2`, so an unanchored pattern reports a hit on every centred element and trains you to skim past real findings.
+- The radius half needs `\b` so that `rounded-[var(--radius-full)]` — the correct token form — is not flagged as a violation of itself.
+
+Two deliberate exclusions, so their absence is not read as an oversight: `bg-black` (no slash) on the player shell is the letterbox behind a video frame, where true black is the right answer and no token applies; and `--scrim` covers the overlay alphas as of Task 7.
+
+One conversion the grep cannot see, in `app/page.tsx`: the primary CTA is `bg-white … text-neutral-950`. Make it `bg-text text-bg`, matching the play button inside `TapToWatch`. The tokens are near-white and near-black, so it looks the same and stops being the one hardcoded pair left in the app.
 
 - [ ] **Step 4: Verify contrast and structure in a real browser**
 
@@ -1561,13 +1783,29 @@ Run `npm run build && npm run start`. With the Chrome MCP tools, open a room and
 
 ```js
 JSON.stringify(
-  [...document.querySelectorAll('button, a')]
-    .filter(el => !el.textContent?.trim() && !el.getAttribute('aria-label'))
+  [...document.querySelectorAll('button, a, input, select, textarea')]
+    .filter(el => {
+      if (el.getAttribute('aria-label') || el.getAttribute('aria-labelledby')) return false
+      // A form control's name can come from a <label>, which has no text of
+      // its own inside the control — checking textContent alone would clear
+      // every input in the app and clear nothing that was actually wrong.
+      if (el.labels?.length) return false
+      return !el.textContent?.trim()
+    })
     .map(el => el.outerHTML.slice(0, 80))
 )
 ```
 
-Expected: `[]` — every icon-only control carries an `aria-label`.
+Expected: `[]` — every control has an accessible name from somewhere.
+
+Two notes on that selector. It covers form controls, not just `button, a`: an
+earlier version queried only the latter and structurally could not see that the
+room-code field's *only* accessible name was its placeholder, so it announced
+as "word-word-abcd, edit text" and lost even that the moment someone typed.
+And run it on more than one screen — at minimum the landing page, an empty
+room, and a room with a track queued. The queue's own remove buttons do not
+exist in an empty room, so a single audit of the default state cannot see the
+control this task added.
 
 Then confirm no horizontal overflow at 320px:
 
@@ -1596,9 +1834,12 @@ Run: `npm test && npx tsc --noEmit && npm run lint`
 Expected: all green.
 
 ```bash
-git add components/Queue.tsx components/AddTrackForm.tsx app/page.tsx app/layout.tsx
+git add components/Queue.tsx components/AddTrackForm.tsx app/page.tsx app/layout.tsx \
+        components/Room.tsx components/PresenceBar.tsx components/Toasts.tsx components/GifPicker.tsx
 git commit -m "feat: token-based styling and accessibility pass"
 ```
+
+That list covers all eight files this task touches — the four original surfaces, plus `Room.tsx` from Step 0 and the three carrying fixes routed here from Tasks 3, 4 and 6. Run `git status` afterwards and confirm nothing is left unstaged.
 
 ---
 

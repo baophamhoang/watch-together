@@ -1,15 +1,24 @@
 'use client'
 
 import {useCallback, useEffect, useRef, useState} from 'react'
+import {SkipForward} from 'lucide-react'
 import {AddTrackForm} from './AddTrackForm'
+import {ChatComposer} from './ChatComposer'
+import {ChatPanel} from './ChatPanel'
+import {GifPicker} from './GifPicker'
+import {InviteBar} from './InviteBar'
 import {Queue} from './Queue'
+import {RoomTabs} from './RoomTabs'
+import {TapToWatch} from './TapToWatch'
+import {Toasts, type Toast} from './Toasts'
 import {loadNickname} from '@/lib/identity'
-import type {Track, Unplayable} from '@/lib/sync/types'
+import {diffRoster} from '@/lib/presence'
+import type {RosterEntry, Track, Unplayable} from '@/lib/sync/types'
 import {useRoom} from '@/lib/sync/use-room'
 import {useSyncPlayback} from '@/lib/sync/use-sync-playback'
 import {useYouTubePlayer} from '@/lib/youtube/use-player'
 
-export function Room({code}: {code: string}) {
+export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) {
   const [name, setName] = useState('friend')
   const positionRef = useRef<() => number>(() => 0)
 
@@ -36,6 +45,7 @@ export function Room({code}: {code: string}) {
   })
 
   const [localBlock, setLocalBlock] = useState<Unplayable | null>(null)
+  const [activated, setActivated] = useState(false)
 
   const onEnded = useCallback(() => {
     const trackId = trackIdRef.current
@@ -87,6 +97,13 @@ export function Room({code}: {code: string}) {
   // strip this from the exact build it needs to work in. playwright.config.ts
   // sets NEXT_PUBLIC_WT_DEBUG=1 for its webServer (build and start both) so
   // the e2e suite keeps working; it is unset for a real production build.
+  //
+  // The dependency array below is honest about what the body reads but claims
+  // no precision: `room` is a fresh object on every render (see useRoom), so
+  // this effect runs every render regardless of what else is listed. That is
+  // intentional and cheap — it only reassigns one property on window — and the
+  // hook must not be "optimized" into depending on the pieces instead, since
+  // the whole point is that the reader sees current values.
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_WT_DEBUG !== '1') return
     ;(window as unknown as {__watchTogether?: unknown}).__watchTogether = {
@@ -103,80 +120,215 @@ export function Room({code}: {code: string}) {
     }
   }, [handle, room, current])
 
+  const [toasts, setToasts] = useState<Toast[]>([])
+  const previousRoster = useRef<RosterEntry[]>([])
+
+  useEffect(() => {
+    const {joined, left} = diffRoster(previousRoster.current, room.roster)
+    previousRoster.current = room.roster
+    if (joined.length === 0 && left.length === 0) return
+    const next = [
+      ...joined.map(p => ({id: `j-${p.peerId}-${Date.now()}`, message: `${p.name} joined`})),
+      ...left.map(p => ({id: `l-${p.peerId}-${Date.now()}`, message: `${p.name} left`})),
+    ]
+    setToasts(current => [...current, ...next])
+  }, [room.roster])
+
+  const dismissToast = useCallback(
+    (id: string) => setToasts(current => current.filter(t => t.id !== id)),
+    [],
+  )
+
+  const [unread, setUnread] = useState(0)
+  const seenId = useRef<string | null>(null)
+  const chatOpen = useRef(false)
+
+  // Keyed on the newest message's IDENTITY, not on `messages.length`. The
+  // history is capped at CHAT_HISTORY_LIMIT, so past 200 messages the length
+  // pins forever — and a dependency that stops changing is an effect that stops
+  // running. The badge would stop counting at exactly the moment the room is
+  // busiest. Counting from the last-seen id rather than a stored count survives
+  // the same cap: `seenIndex` is -1 both on the first run and once the last-seen
+  // message has itself been evicted, and `length - 1 - (-1)` is the whole
+  // visible history, which is the right answer in both cases.
+  const messages = room.messages
+  const lastMessageId = messages.at(-1)?.id
+
+  useEffect(() => {
+    if (!lastMessageId || lastMessageId === seenId.current) return
+    const seenIndex = messages.findIndex(m => m.id === seenId.current)
+    const added = messages.length - 1 - seenIndex
+    seenId.current = lastMessageId
+    if (!chatOpen.current) setUnread(u => u + added)
+  }, [lastMessageId, messages])
+
   const add = (track: Track) => room.send({type: 'enqueue', track})
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-6xl flex-col gap-4 p-4 lg:flex-row">
-      <section className="flex-1">
-        <div className="yt-player-shell relative aspect-video w-full overflow-hidden rounded-xl bg-black">
+    <main className="flex h-dvh flex-col landscape:flex-row lg:flex-row">
+      {/* The video is the protagonist: it takes every pixel the rail does not. */}
+      <section className="flex min-w-0 flex-col landscape:flex-1 lg:flex-1">
+        <div className="yt-player-shell relative aspect-video w-full shrink-0 bg-black landscape:aspect-auto landscape:flex-1 lg:aspect-auto lg:flex-1">
           <div ref={containerRef} className="h-full w-full" />
+
           {loadError && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/85 p-6 text-center">
-              <p className="text-sm text-neutral-300">
-                Could not load the YouTube player. An ad or privacy blocker may be
-                stopping it. Reload the page to try again.
-              </p>
-            </div>
+            <PlayerOverlay>
+              Could not load the YouTube player. An ad or privacy blocker may be
+              stopping it. Reload the page to try again.
+            </PlayerOverlay>
           )}
+
           {localBlock && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/85 p-6 text-center">
-              <p className="text-sm text-neutral-300">
-                {localBlock === 'embed-blocked'
-                  ? "This video can't be played here — it may be blocked in your region."
-                  : 'This video is unavailable for you.'}
-              </p>
-              <button
-                onClick={() => {
+            <PlayerOverlay
+              action={{
+                label: 'Skip for everyone',
+                onClick: () => {
                   const trackId = trackIdRef.current
                   if (trackId) room.send({type: 'unplayable', trackId, reason: localBlock})
-                }}
-                className="rounded-lg border border-neutral-600 px-3 py-1.5 text-sm hover:border-neutral-400"
-              >
-                Skip for everyone
-              </button>
-            </div>
+                },
+              }}
+            >
+              {localBlock === 'embed-blocked'
+                ? "This video can't be played here — it may be blocked in your region."
+                : 'This video is unavailable for you.'}
+            </PlayerOverlay>
+          )}
+
+          {/* Suppressed alongside the other two overlays rather than stacked on top
+              of them: this renders last, so an un-suppressed gate would sit above
+              the unplayable overlay and swallow its "Skip for everyone" button. */}
+          {!activated && !loadError && !localBlock && (
+            <TapToWatch
+              // This closure must NOT be memoized. `handle` comes from a
+              // useMemo keyed on the player's readiness, so the `if (!handle)`
+              // guard below is correct only because an inline closure is
+              // rebuilt when readiness flips. A useCallback here would capture
+              // the null handle forever and turn "strands the user" into "gate
+              // permanently stuck" — the same bug wearing the fix's clothes.
+              onActivate={() => {
+                // A tap before the IFrame API has finished loading must not dismiss
+                // the gate. `handle` is null across a real network round trip, and
+                // the gate is the largest thing on screen from first paint, so an
+                // early tap is likely on exactly the slow mobile connections this
+                // feature exists for. Dismissing on that tap would strand the user:
+                // the gate never returns (`activated` is one-way), and the play()
+                // that useSyncPlayback issues once the handle appears comes from an
+                // effect, carries no user activation, and is blocked by the very
+                // policy this gate exists to satisfy — leaving a dead player with
+                // no affordance and nothing on screen suggesting a reload.
+                if (!handle) return
+                setActivated(true)
+                // Called inside the click handler so it runs under a real user
+                // gesture — that activation is exactly what the autoplay policy
+                // requires, and it does not survive an async hop.
+                handle.play()
+                // Play-then-pause, not a conditional play: the play() above is
+                // what spends the gesture and unlocks autoplay, so it has to
+                // happen even when the room is paused. Without the pause, a
+                // guest joining a paused room starts playing alone and never
+                // recovers — useSyncPlayback's effect re-runs only on
+                // [handle, current?.id, state.isPlaying], none of which change,
+                // and decideCorrection has no pause rung, so they settle into a
+                // seek-back/play-forward cycle with audio. pause() also re-arms
+                // use-player's suppression window, so a PLAYING event that
+                // lands late on a slow connection cannot fire onUserPlay and
+                // un-pause the video for everyone. Both calls stay synchronous:
+                // an await or a timer here would leave the gesture behind.
+                if (!room.state.isPlaying) handle.pause()
+              }}
+            />
           )}
         </div>
 
-        <div className="mt-3 flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-[var(--space-3)] border-t border-border px-[var(--space-3)] py-[var(--space-2)]">
           <button
             onClick={() => room.send({type: 'skip'})}
             disabled={room.state.queue.length === 0}
             data-testid="skip"
-            className="rounded-lg border border-neutral-700 px-3 py-1.5 text-sm hover:border-neutral-500 disabled:opacity-40"
+            aria-label="Skip to next track"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius-md)] text-text hover:bg-surface-raised disabled:text-subtle disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed"
           >
-            Skip
+            <SkipForward size={18} aria-hidden />
           </button>
-          <p className="truncate text-sm text-neutral-400" data-testid="now-playing">
+          <p className="min-w-0 flex-1 truncate text-sm text-text" data-testid="now-playing">
             {current ? current.title : 'Nothing playing'}
           </p>
-          {resyncing && <span className="text-xs text-amber-400">resyncing…</span>}
+          {resyncing && <span className="shrink-0 text-xs text-warn">resyncing…</span>}
         </div>
       </section>
 
-      <aside className="flex w-full flex-col gap-4 lg:w-96">
-        <div className="flex items-center justify-between text-sm">
-          <code className="rounded bg-neutral-900 px-2 py-1" data-testid="room-code">
-            {code}
-          </code>
-          <span className="text-neutral-500" data-testid="status">
-            {room.status === 'connected'
-              ? `${room.roster.length} watching${room.isHost ? ' · host' : ''}`
-              : room.status === 'blocked'
-                ? 'network blocked'
-                : 'connecting…'}
-          </span>
-        </div>
+      <aside className="flex min-h-0 w-full flex-1 flex-col border-border landscape:w-[380px] landscape:flex-none landscape:border-l lg:w-[380px] lg:flex-none lg:border-l">
+        <InviteBar
+          code={code}
+          roster={room.roster}
+          selfId={room.selfId}
+          status={room.status}
+          isHost={room.isHost}
+        />
 
         {room.warning && (
-          <p className="rounded-lg bg-amber-950/60 px-3 py-2 text-sm text-amber-300">
+          <p className="shrink-0 border-b border-border px-[var(--space-3)] py-[var(--space-2)] text-sm text-warn">
             {room.warning}
           </p>
         )}
 
-        <AddTrackForm onAdd={add} addedBy={{peerId: room.selfId, name}} />
-        <Queue state={room.state} onRemove={id => room.send({type: 'remove', trackId: id})} />
+        <RoomTabs
+          unreadCount={unread}
+          onTabChange={next => {
+            chatOpen.current = next === 'chat'
+            if (next === 'chat') setUnread(0)
+          }}
+          queue={
+            <div className="flex flex-col gap-[var(--space-3)] p-[var(--space-3)]">
+              <AddTrackForm onAdd={add} addedBy={{peerId: room.selfId, name}} />
+              <Queue
+                state={room.state}
+                onRemove={id => room.send({type: 'remove', trackId: id})}
+              />
+            </div>
+          }
+          chat={
+            <ChatPanel
+              messages={room.messages}
+              selfId={room.selfId}
+              composer={
+                <ChatComposer
+                  onSend={body => room.sendChat('text', body)}
+                  gifSlot={
+                    gifsEnabled ? (
+                      <GifPicker onPick={url => room.sendChat('gif', url)} />
+                    ) : null
+                  }
+                />
+              }
+            />
+          }
+        />
       </aside>
+
+      <Toasts items={toasts} onDismiss={dismissToast} />
     </main>
+  )
+}
+
+function PlayerOverlay({
+  children,
+  action,
+}: {
+  children: React.ReactNode
+  action?: {label: string; onClick(): void}
+}) {
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-[var(--space-3)] bg-[var(--scrim)] p-[var(--space-4)] text-center">
+      <p className="max-w-sm text-sm text-text">{children}</p>
+      {action && (
+        <button
+          onClick={action.onClick}
+          className="rounded-[var(--radius-md)] border border-border px-[var(--space-3)] py-[var(--space-2)] text-sm text-text hover:bg-surface-raised cursor-pointer"
+        >
+          {action.label}
+        </button>
+      )}
+    </div>
   )
 }

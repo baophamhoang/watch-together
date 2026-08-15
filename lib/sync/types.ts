@@ -20,6 +20,11 @@ export type RoomState = {
   isPlaying: boolean
   position: number
   positionAt: number
+  /** Increments every time a track starts, including a restart of the same
+      track. `currentTrackId` cannot express that — a one-track queue wraps to
+      itself — so without this the player has no way to tell a restart from
+      the track simply still playing, and stays frozen at the end. */
+  trackRun: number
 }
 
 export type Intent =

@@ -62,27 +62,37 @@ export function AddTrackForm({
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex gap-2">
+    <div className="flex flex-col gap-[var(--space-2)]">
+      <div className="flex gap-[var(--space-2)]">
         <input
           value={url}
           onChange={event => setUrl(event.target.value)}
-          onKeyDown={event => event.key === 'Enter' && submit()}
+          // `isComposing` guard: while an IME is open, Enter accepts the
+          // candidate rather than submitting. Without it, typing Japanese,
+          // Chinese or Korean fires this on the Enter that picks a character.
+          onKeyDown={event => {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) submit()
+          }}
           placeholder="Paste a YouTube link"
+          aria-label="YouTube link"
           disabled={busy}
           data-testid="add-url"
-          className="flex-1 rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-neutral-500"
+          className="min-h-11 flex-1 rounded-[var(--radius-md)] border border-border-strong bg-surface px-[var(--space-3)] py-[var(--space-2)] text-sm text-text placeholder:text-subtle"
         />
         <button
           onClick={submit}
           disabled={busy}
           data-testid="add-submit"
-          className="rounded-lg border border-neutral-700 px-4 text-sm hover:border-neutral-500 disabled:opacity-50"
+          // One disabled treatment across the app: subtle text with the hover
+          // affordance suppressed, matching ChatComposer's send button and the
+          // skip button. This button's hover moves the border rather than the
+          // background, so that is the one neutralised here.
+          className="rounded-[var(--radius-md)] border border-border px-[var(--space-3)] text-sm text-text hover:border-border-strong disabled:text-subtle disabled:hover:border-border cursor-pointer disabled:cursor-not-allowed"
         >
           {busy ? 'Adding…' : 'Add'}
         </button>
       </div>
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
     </div>
   )
 }

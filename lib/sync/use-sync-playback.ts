@@ -16,6 +16,9 @@ export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
   const seekLatencyMs = useRef(DEFAULT_SEEK_LATENCY_MS)
   const inFlightSeek = useRef<{target: number; startedAt: number} | null>(null)
   const loadedTrackId = useRef<string | null>(null)
+  /** `state.trackRun` at the moment `loadedTrackId` was loaded. -1 is a run
+   *  number the reducer never issues, so nothing is ever mistaken for loaded. */
+  const loadedRun = useRef(-1)
   const [resyncing, setResyncing] = useState(false)
 
   // `useRoom` returns a fresh object literal on every render. The drift-check
@@ -32,14 +35,24 @@ export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
   const current: Track | null =
     state.queue.find(track => track.id === state.currentTrackId) ?? null
 
-  // Load whenever the room moves to a different queue entry.
+  // Load whenever the room moves to a different queue entry — OR restarts the
+  // one it is already on. The id alone is not enough to spot the second case: a
+  // one-track queue wraps to itself when the video ends, so `currentTrackId` is
+  // unchanged while the reducer has genuinely rewound the room to `startAtSec`.
+  // Bailing on the id alone left the player parked on the final frame while the
+  // room claimed position 0 and playing — and only guests could recover, by
+  // drift-correcting; the host never corrects itself, so it stayed stuck until
+  // someone hit skip. `state.trackRun` is the discriminator (`positionAt` is
+  // not: it also moves on play, pause and seek, so keying on it would reload
+  // the video every time anyone hit pause).
   useEffect(() => {
     if (!handle || !current) return
-    if (loadedTrackId.current === current.id) return
+    if (loadedTrackId.current === current.id && loadedRun.current === state.trackRun) return
     loadedTrackId.current = current.id
+    loadedRun.current = state.trackRun
     handle.load(current.videoId, state.position)
     lastSeekAt.current = Date.now()
-  }, [handle, current, state.position])
+  }, [handle, current, state.position, state.trackRun])
 
   // Follow the authoritative play/pause flag. Unlike the load effect above,
   // `!current` must NOT bail out here: removing the last queued track sets

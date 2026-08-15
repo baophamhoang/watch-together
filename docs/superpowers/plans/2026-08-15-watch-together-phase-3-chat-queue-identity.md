@@ -212,6 +212,13 @@ npm install @dnd-kit/core@^6.3.1 @dnd-kit/sortable@^10.0.0
 
 Both declare `react >=16.8.0`, so React 19.2.8 is supported.
 
+**Do not consult dndkit.com, and do not trust a docs lookup for "dnd kit".** There are two coexisting generations of this library with incompatible APIs, and the documentation site covers the *other* one:
+
+- **`@dnd-kit/react` (0.x)** — the rewrite. `useSortable` returns `{ref, handleRef, isDragging}`, where `isDragging` is a *function*. This is what dndkit.com documents.
+- **`@dnd-kit/core` v6 + `@dnd-kit/sortable` v10** — the stable line, and what this task uses. `useSortable` returns `{attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging}`, where `isDragging` is a boolean.
+
+Following the wrong one produces code that typechecks against nothing and fails at runtime. The API in Step 2 was verified directly against `node_modules/@dnd-kit/sortable/dist/hooks/useSortable.d.ts` — read that file if you need to confirm a name, not the web.
+
 - [ ] **Step 2: Give each row a drag handle**
 
 A dedicated handle, not a draggable row. Two reasons, both load-bearing: the row already carries a remove button, and making the whole row draggable would turn every attempt to press it into a drag; and on a phone the queue sits inside a scrolling panel, so a row-wide drag target would swallow scroll gestures.

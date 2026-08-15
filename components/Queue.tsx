@@ -1,5 +1,6 @@
 'use client'
 
+import {useMemo} from 'react'
 import {DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors} from '@dnd-kit/core'
 import type {DragEndEvent} from '@dnd-kit/core'
 import {restrictToParentElement, restrictToVerticalAxis} from '@dnd-kit/modifiers'
@@ -35,6 +36,12 @@ export function Queue({
     onReorder(String(active.id), toIndex)
   }
 
+  // SortableContext compares `items` by value, not identity, so a fresh array
+  // every render is provably safe today — but Room re-renders every 2s on a
+  // guest, and memoising removes the need for the next reader to re-derive
+  // that safety argument themselves.
+  const itemIds = useMemo(() => state.queue.map(t => t.id), [state.queue])
+
   if (state.queue.length === 0) {
     return (
       <p className="text-sm text-muted">
@@ -50,7 +57,7 @@ export function Queue({
       modifiers={[restrictToVerticalAxis, restrictToParentElement]}
       onDragEnd={handleDragEnd}
     >
-      <SortableContext items={state.queue.map(t => t.id)} strategy={verticalListSortingStrategy}>
+      <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
         <ul className="flex flex-col gap-[var(--space-1)]" data-testid="queue">
           {state.queue.map(track => (
             <QueueRow

@@ -2,6 +2,30 @@
 
 import {type RefObject, useEffect, useRef, useState} from 'react'
 import {joinRoom, selfId} from 'trystero'
+
+/**
+ * Room teardowns waiting to happen, keyed by room code.
+ *
+ * Trystero caches a room by id, and `leave()` does three things that make an
+ * immediate teardown hostile to a remount: it evicts the room from that cache,
+ * it fires its relay unsubscribes **asynchronously**, and — when no rooms
+ * remain — it destroys the shared connection pool outright. A remount that
+ * lands before those settle therefore builds a brand-new room on top of a relay
+ * that is still being dismantled, and the in-flight unsubscribes then cancel
+ * the *new* subscriptions. The tab ends up subscribed to nothing: connected in
+ * name, discovering no peers, reporting "1 watching" forever.
+ *
+ * React Strict Mode performs exactly that mount → unmount → mount in
+ * development, which is why this app has never worked under `next dev`. But a
+ * fast refresh, a route change or a re-key does the same thing in production,
+ * so deferring the leave is a real fix that development merely surfaced first —
+ * not a workaround for a development-only quirk.
+ *
+ * Module scope, not a ref: the point is to survive the unmount that schedules
+ * it. A macrotask is enough, because React runs the remount's effect in the
+ * same flush as the cleanup.
+ */
+const pendingLeaves = new Map<string, ReturnType<typeof setTimeout>>()
 import {appendMessage, isChatMessage} from '@/lib/chat/messages'
 import type {ChatKind, ChatMessage} from '@/lib/chat/types'
 import {DEFAULT_NICKNAME, MAX_NICKNAME_LENGTH} from '@/lib/identity'
@@ -62,6 +86,17 @@ export function useRoom(
   })
 
   useEffect(() => {
+    // A teardown still queued for this code means we are the remount it was
+    // about to strand. Cancelling it leaves the room in Trystero's cache, so
+    // the `joinRoom` below hands back the live room instead of building a
+    // second one on top of a relay that is being dismantled. See
+    // `pendingLeaves` for why the leave is deferred at all.
+    const queuedLeave = pendingLeaves.get(code)
+    if (queuedLeave !== undefined) {
+      clearTimeout(queuedLeave)
+      pendingLeaves.delete(code)
+    }
+
     const room = joinRoom({appId: APP_ID}, code, {
       onJoinError: () => setStatus('blocked'),
     })
@@ -414,7 +449,16 @@ export function useRoom(
       clearInterval(pendingTimer)
       clearInterval(beatTimer)
       clearInterval(clockTimer)
-      room.leave()
+      // Deferred by a macrotask rather than run here, so a remount landing in
+      // the same flush can cancel it. The timers above are NOT deferred: they
+      // belong to this effect run and the remount creates its own.
+      pendingLeaves.set(
+        code,
+        setTimeout(() => {
+          pendingLeaves.delete(code)
+          room.leave()
+        }, 0),
+      )
     }
     // Reconnect only when the room identity changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps

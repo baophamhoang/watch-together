@@ -143,6 +143,36 @@ test('two peers converge on the same playback position', async ({browser}) => {
   await guestContext.close()
 })
 
+test('a shortcode is sent as an emoji and reaches the other peer', async ({browser}) => {
+  const hostContext = await browser.newContext()
+  const guestContext = await browser.newContext()
+  const host = await hostContext.newPage()
+  const guest = await guestContext.newPage()
+
+  const room = await startRoom(host, 'zebra')
+  await joinRoom(guest, 'walrus', room)
+
+  await expect(host.getByTestId('status')).toContainText('2 watching')
+  await expect(guest.getByTestId('status')).toContainText('2 watching')
+
+  // Chat lives behind its own tab and is not mounted until selected — the
+  // panel swaps by identity rather than by hiding, so `chat-input` does not
+  // exist in the DOM on the default Queue tab.
+  await host.getByRole('tab', {name: 'Chat'}).click()
+  await guest.getByRole('tab', {name: 'Chat'}).click()
+
+  await host.getByTestId('chat-input').fill('that was :haha:')
+  await host.getByTestId('chat-send').click()
+
+  // Asserted on the GUEST, not the sender: converting on send is what puts the
+  // emoji on the wire, so the receiving side is where that actually shows.
+  await expect(guest.getByTestId('chat-log')).toContainText('that was 😄')
+  await expect(guest.getByTestId('chat-log')).not.toContainText(':haha:')
+
+  await hostContext.close()
+  await guestContext.close()
+})
+
 test('a malformed link is rejected without touching the queue', async ({page}) => {
   // Its own freshly created room, so neither the previous test nor a stranger
   // on the relay network can bleed in.

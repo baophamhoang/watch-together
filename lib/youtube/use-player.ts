@@ -43,6 +43,16 @@ export function useYouTubePlayer(events: PlayerEvents) {
    * PLAYING or PAUSED after a load is always the load completing, never a
    * person, and reporting it as intent is how a joining peer un-pauses a room
    * for everyone else.
+   *
+   * Known gap, deliberately left: being a boolean rather than a counter, two
+   * loads in flight at once leave one settling event unswallowed — the second
+   * load() re-arms it, and only the next PLAYING/PAUSED (whichever load it
+   * belongs to) gets caught. A counter closes that hole but opens the opposite
+   * one: a load whose settle event never arrives (an error, a track that never
+   * starts) would leave the counter permanently armed, silently swallowing the
+   * first genuine user action on every load after. Two loads racing is rarer
+   * and cheaper (one extra reported intent) than a counter stuck open forever,
+   * so this stays a boolean.
    */
   const loadSettling = useRef(false)
   const eventsRef = useRef(events)

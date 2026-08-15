@@ -279,6 +279,16 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
                 // lands late on a slow connection cannot fire onUserPlay and
                 // un-pause the video for everyone. Both calls stay synchronous:
                 // an await or a timer here would leave the gesture behind.
+                //
+                // Known gap, deliberately left: this pause() is covered only by
+                // use-player's 700ms suppression timer, not the loadSettling-style
+                // swallow Task 1 gave load(). A PAUSED that lands after 700ms would
+                // broadcast a spurious pause intent. Left alone because the blast
+                // radius is small — it cannot un-pause anyone, and it only
+                // overwrites state.position, the load anchor, costing a later
+                // joiner a slightly-off load position that the next correction
+                // fixes. A correct fix means suppressing a PAIR of events, not one,
+                // and that complexity isn't worth it against a cost this small.
                 if (!room.state.isPlaying) handle.pause()
               }}
             />

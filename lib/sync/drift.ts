@@ -14,6 +14,12 @@ export const CORRECTION_COOLDOWN_MS = 3000
 export const MAX_BACKOFF_STEPS = 3
 export const SEEK_SUPPRESSION_MS = 2000
 export const DEFAULT_SEEK_LATENCY_MS = 300
+/**
+ * A seek-latency sample this large can only be a stale `pending` matching an
+ * unrelated tick, not a real round trip — clamped rather than trusted, since
+ * an inflated estimate feeds forward as lead compensation on the next seek.
+ */
+export const MAX_SEEK_LATENCY_MS = 2000
 
 export type CorrectionInput = {
   expected: number
@@ -70,4 +76,12 @@ export function decideCorrection(input: CorrectionInput): Correction {
   // moved on, so aim slightly ahead. Only meaningful while the clock is running.
   const lead = input.isPlaying ? input.seekLatencyMs / 1000 : 0
   return {kind: 'seek', to: input.expected + lead, resyncing: drift > RESYNC_S}
+}
+
+export function nextStreak(correction: Correction, streak: number, targetMoved: boolean): number {
+  // A moved target is not a failed correction — the room changed under us, and
+  // the backoff earned against the old target says nothing about the new one.
+  if (targetMoved) return 0
+  if (correction.kind === 'seek') return streak + 1
+  return correction.caughtUp ? 0 : streak
 }

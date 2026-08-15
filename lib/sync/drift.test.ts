@@ -4,6 +4,8 @@ import {
   MAX_BACKOFF_STEPS,
   decideCorrection,
   expectedPosition,
+  nextStreak,
+  type Correction,
   type CorrectionInput,
 } from './drift'
 
@@ -152,6 +154,19 @@ describe('decideCorrection — network awareness', () => {
     expect(out.kind).toBe('seek')
   })
 
+  // The cap test above proves the backoff doesn't grow past 24s; this pins it
+  // from below, so the cap is a ceiling and not also a floor that fires early.
+  it('still waits out the capped backoff, even at a very high streak', () => {
+    const out = decideCorrection({
+      ...base,
+      consecutiveCorrections: 99,
+      expected: 100,
+      actual: 0,
+      lastCorrectionAt: base.nowLocal - 23_500,
+    })
+    expect(out.kind).toBe('none')
+  })
+
   // The old dead zone was 0.5s, below YouTube's own reporting granularity, so
   // it fired on noise. A tolerance must exceed the noise floor of the thing it
   // measures.
@@ -196,5 +211,34 @@ describe('decideCorrection — network awareness', () => {
         lastCorrectionAt: base.nowLocal - 4000,
       }),
     ).toEqual({kind: 'none', caughtUp: false})
+  })
+})
+
+describe('nextStreak', () => {
+  const seek: Correction = {kind: 'seek', to: 100, resyncing: false}
+  const caughtUp: Correction = {kind: 'none', caughtUp: true}
+  const notYet: Correction = {kind: 'none', caughtUp: false}
+
+  it('increments on a seek', () => {
+    expect(nextStreak(seek, 2, false)).toBe(3)
+  })
+
+  it('resets to zero on genuine catch-up', () => {
+    expect(nextStreak(caughtUp, 5, false)).toBe(0)
+  })
+
+  it('holds steady while waiting — not caught up, but not a new failure either', () => {
+    expect(nextStreak(notYet, 3, false)).toBe(3)
+  })
+
+  it('resets to zero when the target moved, even mid-wait', () => {
+    expect(nextStreak(notYet, 7, true)).toBe(0)
+  })
+
+  // The override applies regardless of what correction fired this same tick —
+  // a moved target isn't just "not a failure", it makes the seek that follows
+  // it a fresh first attempt, not a continuation of the old streak.
+  it('resets to zero when the target moved, even overriding a seek', () => {
+    expect(nextStreak(seek, 9, true)).toBe(0)
   })
 })

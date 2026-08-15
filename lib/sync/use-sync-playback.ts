@@ -1,7 +1,14 @@
 'use client'
 
 import {useEffect, useRef, useState} from 'react'
-import {decideCorrection, DEFAULT_SEEK_LATENCY_MS, expectedPosition} from './drift'
+import {
+  decideCorrection,
+  DEFAULT_SEEK_LATENCY_MS,
+  expectedPosition,
+  MAX_SEEK_LATENCY_MS,
+  nextStreak,
+  RESYNC_S,
+} from './drift'
 import type {RoomApi} from './use-room'
 import type {Track} from './types'
 import type {PlayerHandle} from '@/lib/youtube/use-player'
@@ -20,6 +27,10 @@ export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
   /** `state.trackRun` at the moment `loadedTrackId` was loaded. -1 is a run
    *  number the reducer never issues, so nothing is ever mistaken for loaded. */
   const loadedRun = useRef(-1)
+  /** `beat.version` last seen by the correction interval. -1 is a version the
+   *  reducer never issues, so the first tick always counts as a fresh target —
+   *  harmless, since the streak it would reset is already 0 on the first tick. */
+  const lastBeatVersion = useRef(-1)
   const [resyncing, setResyncing] = useState(false)
 
   // `useRoom` returns a fresh object literal on every render. The drift-check
@@ -94,17 +105,41 @@ export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
 
       const now = Date.now()
       const actual = handle.getCurrentTime()
+      const expected = expectedPosition(beat, now, offsetMs)
+      const drift = Math.abs(expected - actual)
+
+      // A scrub, play/pause, skip or track change all bump `beat.version`, and
+      // nothing else does. Compared and refreshed every tick, so this is true
+      // for exactly the one tick that observes a change — read by nextStreak
+      // below, since a moved target invalidates whatever backoff was earned
+      // against the old one.
+      const targetMoved = beat.version !== lastBeatVersion.current
+      lastBeatVersion.current = beat.version
 
       // Measure how long the last seek took so the next one aims correctly.
+      // Reject a landing more than two ticks old: with corrections now up to
+      // 24s apart, a `pending` left over from several ticks ago could
+      // otherwise match an unrelated later tick's position by coincidence and
+      // feed a wildly inflated latency into the estimate. Clamped below as a
+      // second guard, since a bad sample that slips through would then persist
+      // for however many corrections — now up to 24s apart — the EMA takes to
+      // recover.
       const pending = inFlightSeek.current
-      if (pending && Math.abs(actual - pending.target) < LANDED_TOLERANCE_S) {
+      if (
+        pending &&
+        now - pending.startedAt < 2 * CHECK_INTERVAL_MS &&
+        Math.abs(actual - pending.target) < LANDED_TOLERANCE_S
+      ) {
         const observed = now - pending.startedAt
-        seekLatencyMs.current = Math.round((seekLatencyMs.current + observed) / 2)
+        seekLatencyMs.current = Math.min(
+          Math.round((seekLatencyMs.current + observed) / 2),
+          MAX_SEEK_LATENCY_MS,
+        )
         inFlightSeek.current = null
       }
 
       const correction = decideCorrection({
-        expected: expectedPosition(beat, now, offsetMs),
+        expected,
         actual,
         isPlaying: beat.isPlaying,
         nowLocal: now,
@@ -115,26 +150,27 @@ export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
         consecutiveCorrections: consecutiveCorrections.current,
       })
 
+      consecutiveCorrections.current = nextStreak(correction, consecutiveCorrections.current, targetMoved)
+
       if (correction.kind === 'none') {
-        // Only a genuine dead-zone tick means caught up. Buffering, the
-        // post-seek suppression window and the backoff wait all also return
-        // 'none' — resetting on those restarts the doubling and reintroduces
-        // the loop this exists to break.
-        if (correction.caughtUp) consecutiveCorrections.current = 0
+        // A pending seek that never landed within the window above would
+        // otherwise sit here until the next seek overwrites it — now up to
+        // 24s away instead of ~3s. Cleared unconditionally so a stale entry
+        // can't survive that long only to match some unrelated later tick.
+        inFlightSeek.current = null
         // Same-value updates bail out of a re-render (React dedupes via
         // Object.is), so this is safe to call unconditionally — and it must
         // be unconditional: `resyncing` is deliberately not a dependency
         // below, so a closed-over read of it here would be stale.
-        setResyncing(false)
+        setResyncing(!correction.caughtUp && drift > RESYNC_S)
         return
       }
 
       handle.seekTo(correction.to)
       lastCorrectionAt.current = now
       lastSeekAt.current = now
-      consecutiveCorrections.current += 1
       inFlightSeek.current = {target: correction.to, startedAt: now}
-      setResyncing(correction.resyncing)
+      setResyncing(drift > RESYNC_S)
     }, CHECK_INTERVAL_MS)
 
     return () => clearInterval(timer)

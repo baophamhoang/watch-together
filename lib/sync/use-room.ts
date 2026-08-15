@@ -336,7 +336,14 @@ export function useRoom(
       hostIdRef.current = peerId
       if (isHostRef.current) {
         // Two peers claimed the room at once; both sides resolve it identically.
-        if (resolveHostTie(selfId, peerId) === 'demote') demote()
+        if (
+          resolveHostTie(selfId, peerId, {
+            selfVersion: confirmedRef.current.version,
+            otherVersion: incoming.version,
+          }) === 'demote'
+        ) {
+          demote()
+        }
         return
       }
       // A beat proves a host already exists, so the claim timer must not
@@ -345,6 +352,11 @@ export function useRoom(
       // trust, and only then get demoted on hearing the real host.
       sawHostRef.current = true
       const isNewHost = previousHost !== peerId
+      // A beat from a peer whose replica is behind ours is not a newer truth,
+      // it is an impostor mid-election. Playback currently survives this only
+      // because the drift corrector happens to bail when the track id does not
+      // match what is loaded — luck, in unrelated code, not a guard.
+      if (!isHostRef.current && incoming.version < confirmedRef.current.version) return
       setBeat(incoming)
       if (isNewHost) {
         samplesRef.current = []

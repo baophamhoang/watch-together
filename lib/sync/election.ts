@@ -12,9 +12,21 @@ export function electHost(survivors: RosterEntry[]): string | null {
 }
 
 /**
- * Both peers run this on the same pair of ids and reach opposite verdicts,
+ * Both peers run this on the same pair of inputs and reach opposite verdicts,
  * so a simultaneous-join collision resolves without negotiation.
+ *
+ * State wins before identity. Peer id is a deterministic tiebreak, not a
+ * measure of legitimacy — and because the loser resets its replica to empty,
+ * deciding on id alone meant a peer that had just arrived with nothing could
+ * destroy a room's entire queue by winning a string comparison.
  */
-export function resolveHostTie(selfId: string, otherHostId: string): 'keep' | 'demote' {
+export function resolveHostTie(
+  selfId: string,
+  otherHostId: string,
+  versions: {selfVersion: number; otherVersion: number},
+): 'keep' | 'demote' {
+  if (versions.selfVersion !== versions.otherVersion) {
+    return versions.selfVersion > versions.otherVersion ? 'keep' : 'demote'
+  }
   return selfId < otherHostId ? 'keep' : 'demote'
 }

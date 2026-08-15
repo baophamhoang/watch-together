@@ -7,12 +7,22 @@ import {loadIframeApi} from './iframe-api'
 /** Window after a programmatic move during which player events are not user intent. */
 const REMOTE_SUPPRESSION_MS = 700
 
+export type PlayerState =
+  | 'unstarted'
+  | 'ended'
+  | 'playing'
+  | 'paused'
+  | 'buffering'
+  | 'cued'
+  | 'unknown'
+
 export type PlayerHandle = {
   load(videoId: string, startAtSec: number): void
   play(): void
   pause(): void
   seekTo(seconds: number): void
   getCurrentTime(): number
+  getState(): PlayerState
 }
 
 export type PlayerEvents = {
@@ -26,6 +36,15 @@ export function useYouTubePlayer(events: PlayerEvents) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<YT.Player | null>(null)
   const suppressUntil = useRef(0)
+  /**
+   * A load is pending until the player reports a steady state. Unlike play,
+   * pause and seek — which are local and resolve in milliseconds — a load
+   * fetches over the network, so no fixed timer is honest for it. The first
+   * PLAYING or PAUSED after a load is always the load completing, never a
+   * person, and reporting it as intent is how a joining peer un-pauses a room
+   * for everyone else.
+   */
+  const loadSettling = useRef(false)
   const eventsRef = useRef(events)
   const [ready, setReady] = useState(false)
   const [loadError, setLoadError] = useState<Error | null>(null)
@@ -74,6 +93,16 @@ export function useYouTubePlayer(events: PlayerEvents) {
                 eventsRef.current.onEnded()
                 return
               }
+              // Swallow exactly one settling event, then resume normal
+              // reporting — the person may genuinely press pause a moment
+              // later, and that must still count.
+              if (
+                loadSettling.current &&
+                (event.data === YT.PlayerState.PLAYING || event.data === YT.PlayerState.PAUSED)
+              ) {
+                loadSettling.current = false
+                return
+              }
               // Play and pause DO echo: a move we made ourselves is not a user action,
               // and broadcasting it would bounce between peers forever.
               if (Date.now() < suppressUntil.current) return
@@ -115,6 +144,7 @@ export function useYouTubePlayer(events: PlayerEvents) {
         ? {
             load(videoId, startAtSec) {
               suppress()
+              loadSettling.current = true
               playerRef.current?.loadVideoById({videoId, startSeconds: startAtSec})
             },
             play() {
@@ -131,6 +161,26 @@ export function useYouTubePlayer(events: PlayerEvents) {
             },
             getCurrentTime() {
               return playerRef.current?.getCurrentTime() ?? 0
+            },
+            getState() {
+              // Numeric literals rather than YT.PlayerState: this runs on every
+              // correction tick and the API object is not in scope here.
+              switch (playerRef.current?.getPlayerState()) {
+                case -1:
+                  return 'unstarted'
+                case 0:
+                  return 'ended'
+                case 1:
+                  return 'playing'
+                case 2:
+                  return 'paused'
+                case 3:
+                  return 'buffering'
+                case 5:
+                  return 'cued'
+                default:
+                  return 'unknown'
+              }
             },
           }
         : null,

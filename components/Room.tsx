@@ -38,6 +38,11 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
 
   const room = useRoom(code, name, positionRef)
 
+  // Declared here, above the ref block below, so the ref-mirror effect can
+  // read it without a forward reference to a `const` declared later in the
+  // component.
+  const [activated, setActivated] = useState(false)
+
   // Refs keep the player's event callbacks stable, so the player is never
   // rebuilt just because room state changed. `room` is a fresh object every
   // render (see useRoom), so these can't be synced via a dependency array —
@@ -45,14 +50,15 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
   const sendRef = useRef(room.send)
   const trackIdRef = useRef<string | null>(null)
   const isHostRef = useRef(room.isHost)
+  const activatedRef = useRef(false)
   useEffect(() => {
     sendRef.current = room.send
     trackIdRef.current = room.state.currentTrackId
     isHostRef.current = room.isHost
+    activatedRef.current = activated
   })
 
   const [localBlock, setLocalBlock] = useState<Unplayable | null>(null)
-  const [activated, setActivated] = useState(false)
 
   const onEnded = useCallback(() => {
     const trackId = trackIdRef.current
@@ -68,11 +74,18 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
     else setLocalBlock(reason)
   }, [])
 
-  const onUserPlay = useCallback(() => sendRef.current({type: 'play'}), [])
-  const onUserPause = useCallback(
-    (position: number) => sendRef.current({type: 'pause', position}),
-    [],
-  )
+  const onUserPlay = useCallback(() => {
+    // Before the gate is tapped this user has expressed no intent, so any
+    // state change is the player loading or the sync layer acting. Reporting
+    // it would let one person's arrival start or stop the video for the room.
+    if (!activatedRef.current) return
+    sendRef.current({type: 'play'})
+  }, [])
+
+  const onUserPause = useCallback((position: number) => {
+    if (!activatedRef.current) return
+    sendRef.current({type: 'pause', position})
+  }, [])
 
   useEffect(() => {
     // A track change is a fresh chance to play, so a stale block message from

@@ -101,13 +101,13 @@ describe('decideCorrection — network awareness', () => {
   it('never corrects while the player is buffering', () => {
     expect(
       decideCorrection({...base, playerState: 'buffering', expected: 100, actual: 0}),
-    ).toEqual({kind: 'none'})
+    ).toEqual({kind: 'none', caughtUp: false})
   })
 
   it('never corrects before the player has started', () => {
     expect(
       decideCorrection({...base, playerState: 'unstarted', expected: 100, actual: 0}),
-    ).toEqual({kind: 'none'})
+    ).toEqual({kind: 'none', caughtUp: false})
   })
 
   it('still corrects a paused player, which is a legitimate steady state', () => {
@@ -157,5 +157,44 @@ describe('decideCorrection — network awareness', () => {
   // measures.
   it('tolerates drift that is real but not worth a seek', () => {
     expect(decideCorrection({...base, expected: 101, actual: 100}).kind).toBe('none')
+  })
+
+  // `caughtUp` is what the streak reset keys on. Pinning all four `none`
+  // reasons here because the backoff's entire correctness depends on only one
+  // of them being true.
+  it('reports caught up when the drift is genuinely inside the dead zone', () => {
+    expect(decideCorrection({...base, expected: 100, actual: 100})).toEqual({
+      kind: 'none',
+      caughtUp: true,
+    })
+  })
+
+  it('does not report caught up while buffering', () => {
+    expect(
+      decideCorrection({...base, playerState: 'buffering', expected: 100, actual: 0}),
+    ).toEqual({kind: 'none', caughtUp: false})
+  })
+
+  it('does not report caught up while suppressed after a seek', () => {
+    expect(
+      decideCorrection({
+        ...base,
+        expected: 100,
+        actual: 0,
+        lastSeekAt: base.nowLocal - 500,
+      }),
+    ).toEqual({kind: 'none', caughtUp: false})
+  })
+
+  it('does not report caught up while backing off', () => {
+    expect(
+      decideCorrection({
+        ...base,
+        expected: 100,
+        actual: 0,
+        consecutiveCorrections: 2,
+        lastCorrectionAt: base.nowLocal - 4000,
+      }),
+    ).toEqual({kind: 'none', caughtUp: false})
   })
 })

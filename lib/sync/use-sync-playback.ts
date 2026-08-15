@@ -116,12 +116,11 @@ export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
       })
 
       if (correction.kind === 'none') {
-        // A settled player inside the dead zone is the definition of caught up.
-        // Buffering ticks also return 'none', and must NOT reset the streak —
-        // that would restart the doubling every time the network hiccuped and
-        // reintroduce the loop this exists to break.
-        const settled = handle.getState() === 'playing' || handle.getState() === 'paused'
-        if (settled) consecutiveCorrections.current = 0
+        // Only a genuine dead-zone tick means caught up. Buffering, the
+        // post-seek suppression window and the backoff wait all also return
+        // 'none' — resetting on those restarts the doubling and reintroduces
+        // the loop this exists to break.
+        if (correction.caughtUp) consecutiveCorrections.current = 0
         // Same-value updates bail out of a re-render (React dedupes via
         // Object.is), so this is safe to call unconditionally — and it must
         // be unconditional: `resyncing` is deliberately not a dependency

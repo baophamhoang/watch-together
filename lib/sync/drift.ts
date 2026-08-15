@@ -29,7 +29,15 @@ export type CorrectionInput = {
 }
 
 export type Correction =
-  | {kind: 'none'}
+  /**
+   * `caughtUp` distinguishes the one do-nothing reason that means success —
+   * drift inside the dead zone — from the three that mean "not yet": an
+   * unsettled player, the post-seek suppression window, and the backoff wait.
+   * The caller resets its streak on this and nothing else; keying off player
+   * state instead resets during suppression, which caps the streak at 1 and
+   * flattens the backoff it exists to grow.
+   */
+  | {kind: 'none'; caughtUp: boolean}
   | {kind: 'seek'; to: number; resyncing: boolean}
 
 export function expectedPosition(beat: Beat, nowLocal: number, offsetMs: number): number {
@@ -43,20 +51,20 @@ export function decideCorrection(input: CorrectionInput): Correction {
   // network's latency, not the peer's position — and seeking on it makes the
   // buffering worse.
   if (input.playerState !== 'playing' && input.playerState !== 'paused') {
-    return {kind: 'none'}
+    return {kind: 'none', caughtUp: false}
   }
 
   const drift = Math.abs(input.expected - input.actual)
-  if (drift < DEAD_ZONE_S) return {kind: 'none'}
+  if (drift < DEAD_ZONE_S) return {kind: 'none', caughtUp: true}
 
   const since = (at: number | null) => (at === null ? Infinity : input.nowLocal - at)
-  if (since(input.lastSeekAt) < SEEK_SUPPRESSION_MS) return {kind: 'none'}
+  if (since(input.lastSeekAt) < SEEK_SUPPRESSION_MS) return {kind: 'none', caughtUp: false}
 
   // Each correction that fails to close the gap doubles the wait. A peer on a
   // slow link cannot win a forward-seek race, and retrying every three seconds
   // forever is the visible symptom the user reported.
   const backoff = CORRECTION_COOLDOWN_MS * 2 ** Math.min(input.consecutiveCorrections, MAX_BACKOFF_STEPS)
-  if (since(input.lastCorrectionAt) < backoff) return {kind: 'none'}
+  if (since(input.lastCorrectionAt) < backoff) return {kind: 'none', caughtUp: false}
 
   // Seeking takes time to buffer; by the time playback resumes the target has
   // moved on, so aim slightly ahead. Only meaningful while the clock is running.

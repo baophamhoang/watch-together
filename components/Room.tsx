@@ -284,6 +284,7 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
               <Queue
                 state={room.state}
                 onRemove={id => room.send({type: 'remove', trackId: id})}
+                onReorder={(trackId, toIndex) => room.send({type: 'reorder', trackId, toIndex})}
               />
             </div>
           }

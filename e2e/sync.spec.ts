@@ -204,17 +204,18 @@ test('a link-joiner is prompted for a name, and a stray blur does not commit "fr
   await expect(nameInput).toHaveAttribute('placeholder', 'Your name')
   await expect(nameInput).toBeFocused()
 
-  // The gate only renders once there is something to watch — an empty room
-  // shows a "nothing queued" prompt instead (see Room.tsx), not this gate.
-  // Queuing a track is unrelated to what this test checks; it only makes the
-  // gate exist so the click below has a target.
+  // THIS fill is the blur under test. Focusing another field blurs the name
+  // input, which runs commit() with an empty draft — the exact stray-blur path
+  // that used to write the literal word "friend" to storage. commit() also
+  // unmounts the input, so it is the only blur of it that happens here.
   await page.getByTestId('add-url').fill(VIDEO_URL)
   await page.getByTestId('add-submit').click()
 
-  // The realistic trigger, per the finding this test exists to cover: tapping
-  // the video gate to start playback, not deliberately dismissing the name
-  // prompt. Any click elsewhere blurs the input the same way; this is the one
-  // an actual first-run visitor reaches for.
+  // Clicking the gate afterwards is belt-and-braces, not the trigger: by now
+  // there is no name input left to blur. It stays because it is the gesture a
+  // real first-run visitor reaches for, and it proves the gate does not
+  // resurrect or commit the prompt behind their back. It needs a queued track
+  // to exist at all, which the fill above supplies.
   await page.getByTestId('tap-to-watch').click()
 
   // Mirrors the unexported KEY in lib/identity.ts. Reading storage directly,

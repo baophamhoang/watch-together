@@ -226,7 +226,7 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
             </PlayerOverlay>
           )}
 
-          {/* Suppressed alongside the other two overlays rather than stacked on top
+          {/* Suppressed alongside the other overlays rather than stacked on top
               of them: this renders last, so an un-suppressed gate would sit above
               the unplayable overlay and swallow its "Skip for everyone" button. */}
           {current && !activated && !loadError && !localBlock && (
@@ -347,8 +347,12 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
                         saveSoundMuted(window.localStorage, next)
                       }}
                       data-testid="sound-toggle"
+                      // A toggle button carries its state in `aria-pressed` and
+                      // keeps a STABLE name. Swapping the label as well would
+                      // announce "Turn on message sounds, pressed" while muted —
+                      // each half correct, the pair contradictory.
                       aria-pressed={muted}
-                      aria-label={muted ? 'Turn on message sounds' : 'Turn off message sounds'}
+                      aria-label="Mute message sounds"
                       className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius-md)] text-muted hover:bg-surface-raised hover:text-text cursor-pointer"
                     >
                       {muted ? <VolumeX size={18} aria-hidden /> : <Volume2 size={18} aria-hidden />}

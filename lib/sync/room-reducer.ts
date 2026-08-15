@@ -8,6 +8,7 @@ export function emptyRoomState(): RoomState {
     isPlaying: false,
     position: 0,
     positionAt: 0,
+    trackRun: 0,
   }
 }
 
@@ -29,6 +30,16 @@ function nextPlayableTrackId(queue: Track[], currentId: string | null): string |
   return null
 }
 
+/**
+ * The one place a track begins, and therefore the only place `trackRun` moves.
+ * Every caller here — first enqueue, skip, ended, remove-the-current, and the
+ * unplayable hop — is a genuine start, and the counter has to advance for all
+ * of them because `currentTrackId` alone cannot: `nextTrackId` wraps a
+ * one-entry queue back to itself, so a restart is indistinguishable from
+ * standing still. Do not bump `trackRun` anywhere else — play, pause, seek,
+ * reorder and a non-first enqueue leave the running track exactly where it is,
+ * and a spurious bump would make the player reload and lose that position.
+ */
 function startTrack(state: RoomState, trackId: string | null, now: number): RoomState {
   const track = state.queue.find(t => t.id === trackId)
   return {
@@ -37,6 +48,7 @@ function startTrack(state: RoomState, trackId: string | null, now: number): Room
     position: track?.startAtSec ?? 0,
     positionAt: now,
     isPlaying: trackId !== null,
+    trackRun: state.trackRun + 1,
   }
 }
 

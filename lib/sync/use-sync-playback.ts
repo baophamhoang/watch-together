@@ -16,6 +16,13 @@ import type {PlayerHandle} from '@/lib/youtube/use-player'
 const CHECK_INTERVAL_MS = 1000
 /** Distance at which a seek counts as landed, for latency measurement. */
 const LANDED_TOLERANCE_S = 0.5
+/**
+ * How long a seek may still be considered "in flight" and therefore worth
+ * measuring. Two ticks: enough to observe a seek that buffers for a second or
+ * so, short enough that a pending entry cannot survive into a later, unrelated
+ * tick and be mistaken for a landing there.
+ */
+const STALE_SEEK_MS = 2 * CHECK_INTERVAL_MS
 
 export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
   const lastCorrectionAt = useRef<number | null>(null)
@@ -117,25 +124,36 @@ export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
       lastBeatVersion.current = beat.version
 
       // Measure how long the last seek took so the next one aims correctly.
-      // Reject a landing more than two ticks old: with corrections now up to
-      // 24s apart, a `pending` left over from several ticks ago could
-      // otherwise match an unrelated later tick's position by coincidence and
-      // feed a wildly inflated latency into the estimate. Clamped below as a
-      // second guard, since a bad sample that slips through would then persist
-      // for however many corrections — now up to 24s apart — the EMA takes to
-      // recover.
+      // Age, not liveness, is what makes a pending seek safe to measure. With
+      // corrections now up to 24s apart, one left over from long ago could
+      // match an unrelated later tick's position by coincidence and feed a
+      // wildly inflated latency into the estimate — a 24s "observation" becomes
+      // a 12s forward lead on the next seek, which throws a peer further out of
+      // sync than the drift being corrected. So a stale entry is discarded
+      // rather than believed, and the clamp below bounds anything that slips
+      // through, since a bad sample now persists for however many corrections
+      // the averaging takes to recover.
+      //
+      // Deliberately NOT also cleared on every idle tick. That looks like a
+      // third guard but is really a saboteur: the tick after any seek is always
+      // idle (the suppression window outlives the tick interval), so clearing
+      // there would destroy every pending before this age check could ever
+      // apply, silently narrowing the measurement window to a single tick.
+      // Seeks that take one to two seconds to land — precisely the slow links
+      // where lead compensation earns its keep — would then never update the
+      // estimate at all, and it would sit at its default forever.
       const pending = inFlightSeek.current
-      if (
-        pending &&
-        now - pending.startedAt < 2 * CHECK_INTERVAL_MS &&
-        Math.abs(actual - pending.target) < LANDED_TOLERANCE_S
-      ) {
-        const observed = now - pending.startedAt
-        seekLatencyMs.current = Math.min(
-          Math.round((seekLatencyMs.current + observed) / 2),
-          MAX_SEEK_LATENCY_MS,
-        )
-        inFlightSeek.current = null
+      if (pending) {
+        const age = now - pending.startedAt
+        if (age > STALE_SEEK_MS) {
+          inFlightSeek.current = null
+        } else if (Math.abs(actual - pending.target) < LANDED_TOLERANCE_S) {
+          seekLatencyMs.current = Math.min(
+            Math.round((seekLatencyMs.current + age) / 2),
+            MAX_SEEK_LATENCY_MS,
+          )
+          inFlightSeek.current = null
+        }
       }
 
       const correction = decideCorrection({
@@ -153,11 +171,6 @@ export function useSyncPlayback(room: RoomApi, handle: PlayerHandle | null) {
       consecutiveCorrections.current = nextStreak(correction, consecutiveCorrections.current, targetMoved)
 
       if (correction.kind === 'none') {
-        // A pending seek that never landed within the window above would
-        // otherwise sit here until the next seek overwrites it — now up to
-        // 24s away instead of ~3s. Cleared unconditionally so a stale entry
-        // can't survive that long only to match some unrelated later tick.
-        inFlightSeek.current = null
         // Same-value updates bail out of a re-render (React dedupes via
         // Object.is), so this is safe to call unconditionally — and it must
         // be unconditional: `resyncing` is deliberately not a dependency

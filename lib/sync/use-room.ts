@@ -328,10 +328,24 @@ export function useRoom(
 
     beatAction.onMessage = (incoming, {peerId}) => {
       setStatus('connected')
-      // Recorded for EVERY beat, before the host branch below returns. A peer that
-      // loses a host tie demotes itself here, and if it had not already recorded
-      // who the winner is, the peer gate on state and roster would drop the new
-      // host's broadcasts until its next heartbeat.
+      // Rejected before it can name anyone host. A beat from a peer whose
+      // replica is behind ours is not a newer truth, it is an impostor
+      // mid-election — and `hostIdRef` is the gate that `rosterAction` and
+      // `stateAction` both consult. Letting a stale beat set it hands the
+      // impostor authority over the roster, which carries no version of its own
+      // and so is accepted wholesale: the room collapses to "1 watching" even
+      // though nobody has left. State survives that only because
+      // `shouldAcceptState` independently demands a higher version.
+      //
+      // Guests only. A host must still hear a rival beat to resolve the tie
+      // below, and the winner of that tie is by definition the peer with the
+      // higher version, so this can never suppress it.
+      if (!isHostRef.current && incoming.version < confirmedRef.current.version) return
+      // Recorded for every beat that survives the check above, before the host
+      // branch below returns. A peer that loses a host tie demotes itself here,
+      // and if it had not already recorded who the winner is, the peer gate on
+      // state and roster would drop the new host's broadcasts until its next
+      // heartbeat.
       const previousHost = hostIdRef.current
       hostIdRef.current = peerId
       if (isHostRef.current) {
@@ -352,11 +366,6 @@ export function useRoom(
       // trust, and only then get demoted on hearing the real host.
       sawHostRef.current = true
       const isNewHost = previousHost !== peerId
-      // A beat from a peer whose replica is behind ours is not a newer truth,
-      // it is an impostor mid-election. Playback currently survives this only
-      // because the drift corrector happens to bail when the track id does not
-      // match what is loaded — luck, in unrelated code, not a guard.
-      if (!isHostRef.current && incoming.version < confirmedRef.current.version) return
       setBeat(incoming)
       if (isNewHost) {
         samplesRef.current = []

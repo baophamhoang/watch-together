@@ -20,10 +20,22 @@ just won't connect" reports.
 model is deliberately free-for-all — but scrubbing the timeline is host-only.
 A guest's seek is not replicated.
 
-**Concurrent adds can flicker.** Two people pasting a link at the same instant
-can briefly see the queue reorder before it settles. The fix is a per-peer
-sequence number on intents so the host can order them deterministically; the
-replication protocol has no such ordering today.
+**Concurrent queue edits can flicker or land in the wrong slot.** Two people
+pasting a link at the same instant can briefly see the queue reorder before it
+settles. Dragging shares the same root cause and is slightly more visible: a
+guest's drop position is an absolute index computed against its own copy of the
+queue at the moment of release, and the host applies it against whatever the
+queue is when the message arrives. If someone else adds, removes or reorders in
+that window, the row lands somewhere the dragger did not intend and visibly
+snaps there.
+
+It is bounded rather than dangerous — the reducer ignores an intent whose track
+has since been removed, and clamps an out-of-range index — so the failure is
+always "wrong slot", never a crash, a lost track or a duplicated one, and
+dragging again fixes it.
+
+The fix for both is a per-peer sequence number on intents so the host can order
+them deterministically; the replication protocol has no such ordering today.
 
 **Inbound room state is not validated.** Chat messages are validated on arrival
 and nicknames are clamped, but roster and state broadcasts are not — they are

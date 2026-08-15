@@ -105,7 +105,7 @@ function QueueRow({
         aria-label={`Reorder ${track.title}`}
         // touch-none is required, not cosmetic: without it the browser claims
         // the gesture for scrolling and the drag never starts on a phone.
-        className="flex h-11 w-6 shrink-0 touch-none items-center justify-center rounded-[var(--radius-md)] text-subtle hover:text-text cursor-grab active:cursor-grabbing"
+        className="flex h-11 w-11 shrink-0 touch-none items-center justify-center rounded-[var(--radius-md)] text-subtle hover:text-text cursor-grab active:cursor-grabbing"
       >
         <GripVertical size={16} aria-hidden />
       </button>

@@ -21,6 +21,20 @@ export function loadNickname(storage: NicknameStorage): string {
   }
 }
 
+/**
+ * Whether the user has ever chosen a name, as distinct from whether they
+ * currently have one. `loadNickname` answers the second question and returns
+ * the default for both cases, which is what makes it useless for deciding
+ * whether to prompt.
+ */
+export function hasStoredNickname(storage: NicknameStorage): boolean {
+  try {
+    return normalize(storage.getItem(KEY) ?? '').length > 0
+  } catch {
+    return false
+  }
+}
+
 export function saveNickname(storage: NicknameStorage, name: string): void {
   try {
     storage.setItem(KEY, normalize(name))

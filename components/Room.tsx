@@ -7,11 +7,12 @@ import {ChatComposer} from './ChatComposer'
 import {ChatPanel} from './ChatPanel'
 import {GifPicker} from './GifPicker'
 import {InviteBar} from './InviteBar'
+import {NameBadge} from './NameBadge'
 import {Queue} from './Queue'
 import {RoomTabs} from './RoomTabs'
 import {TapToWatch} from './TapToWatch'
 import {Toasts, type Toast} from './Toasts'
-import {loadNickname} from '@/lib/identity'
+import {hasStoredNickname, loadNickname, saveNickname} from '@/lib/identity'
 import {diffRoster} from '@/lib/presence'
 import type {RosterEntry, Track, Unplayable} from '@/lib/sync/types'
 import {useRoom} from '@/lib/sync/use-room'
@@ -20,6 +21,7 @@ import {useYouTubePlayer} from '@/lib/youtube/use-player'
 
 export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) {
   const [name, setName] = useState('friend')
+  const [needsName, setNeedsName] = useState(false)
   const positionRef = useRef<() => number>(() => 0)
 
   useEffect(() => {
@@ -27,6 +29,10 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
     // the server), so hydrating the nickname here is unavoidable.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setName(loadNickname(window.localStorage))
+    // Someone who arrived by invite link has never seen the landing page, so
+    // nothing is stored and they would be "friend" to everyone with no way to
+    // change it. Opening the badge in edit mode is the whole fix for that.
+    setNeedsName(!hasStoredNickname(window.localStorage))
   }, [])
 
   const room = useRoom(code, name, positionRef)
@@ -271,6 +277,18 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
             {room.warning}
           </p>
         )}
+
+        <div className="flex shrink-0 items-center justify-between gap-[var(--space-2)] border-b border-border px-[var(--space-3)] py-[var(--space-1)]">
+          <span className="text-xs text-subtle">You</span>
+          <NameBadge
+            name={name}
+            startEditing={needsName}
+            onRename={next => {
+              setName(next)
+              saveNickname(window.localStorage, next)
+            }}
+          />
+        </div>
 
         <RoomTabs
           unreadCount={unread}

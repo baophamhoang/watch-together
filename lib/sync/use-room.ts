@@ -29,8 +29,16 @@ const pendingLeaves = new Map<string, ReturnType<typeof setTimeout>>()
 import {appendMessage, isChatMessage} from '@/lib/chat/messages'
 import type {ChatKind, ChatMessage} from '@/lib/chat/types'
 import {DEFAULT_NICKNAME, MAX_NICKNAME_LENGTH} from '@/lib/identity'
+import {shouldClaimRoom} from './claim'
 import {bestOffset, makeSample, pushSample, type ClockSample} from './clock'
-import {APP_ID, BEAT_INTERVAL_MS, CLOCK_BURST_SAMPLES, CLOCK_RESAMPLE_MS, HOST_CLAIM_MS} from './constants'
+import {
+  APP_ID,
+  BEAT_INTERVAL_MS,
+  CLOCK_BURST_SAMPLES,
+  CLOCK_RESAMPLE_MS,
+  HOST_CLAIM_MS,
+  HOST_CLAIM_WITH_PEERS_MS,
+} from './constants'
 import {electHost, resolveHostTie} from './election'
 import {expirePending, shouldAcceptState, type PendingIntent} from './pending'
 import {applyIntent, emptyRoomState} from './room-reducer'
@@ -295,9 +303,28 @@ export function useRoom(
     }
 
     // Claim the room only if no existing host announced itself first.
-    const claimTimer = setTimeout(() => {
-      if (!isHostRef.current && !sawHostRef.current) promote()
-    }, HOST_CLAIM_MS)
+    let claimTimer: ReturnType<typeof setTimeout>
+    const scheduleClaim = (delayMs: number, waitedFullWindow = false) => {
+      clearTimeout(claimTimer)
+      claimTimer = setTimeout(() => {
+        if (
+          shouldClaimRoom({
+            isHost: isHostRef.current,
+            sawHost: sawHostRef.current,
+            connectedPeers: joinOrderRef.current.size,
+            waitedFullWindow,
+          })
+        ) {
+          promote()
+        } else if (!waitedFullWindow) {
+          // Peers appeared but none has announced. Give them the full window
+          // once, then claim regardless — a room where every peer defers
+          // forever is worse than one with a wrongly-chosen host.
+          scheduleClaim(HOST_CLAIM_WITH_PEERS_MS, true)
+        }
+      }, delayMs)
+    }
+    scheduleClaim(HOST_CLAIM_MS)
 
     beatAction.onMessage = (incoming, {peerId}) => {
       setStatus('connected')
@@ -346,6 +373,10 @@ export function useRoom(
       // roster containing only themselves, and a later successor election would
       // find no survivors and leave the room hostless and frozen.
       joinOrderRef.current.set(peerId, nextJoinOrderRef.current++)
+      // A peer we have not heard from yet may be the host, still completing its
+      // handshake. Restart the wait rather than counting the time it spent
+      // connecting against it.
+      if (!isHostRef.current && !sawHostRef.current) scheduleClaim(HOST_CLAIM_WITH_PEERS_MS, true)
       if (isHostRef.current) {
         // Re-announced first so the newcomer learns who the host is without
         // waiting for the next beat. This broadcasts; it is not a targeted

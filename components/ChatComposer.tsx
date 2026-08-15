@@ -2,6 +2,7 @@
 
 import {useState} from 'react'
 import {SendHorizontal} from 'lucide-react'
+import {replaceShortcodes} from '@/lib/emoji/replace'
 
 export function ChatComposer({
   onSend,
@@ -14,7 +15,7 @@ export function ChatComposer({
 
   const submit = () => {
     if (!draft.trim()) return
-    onSend(draft)
+    onSend(replaceShortcodes(draft))
     setDraft('')
   }
 

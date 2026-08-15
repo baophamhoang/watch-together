@@ -67,6 +67,36 @@ describe('replaceShortcodes', () => {
     expect(replaceShortcodes('https://youtu.be/x')).toBe('https://youtu.be/x')
   })
 
+  // The character class does not save us here — the colon is followed by
+  // ordinary word characters, so without the link-token skip this becomes
+  // `http://x/🔥` and the link is broken.
+  it('leaves a shortcode-shaped segment inside a URL alone', () => {
+    expect(replaceShortcodes('http://x/:fire:')).toBe('http://x/:fire:')
+    expect(replaceShortcodes('https://e.com/:fire:/p')).toBe('https://e.com/:fire:/p')
+  })
+
+  it('still replaces a code sitting next to a URL', () => {
+    expect(replaceShortcodes('watch https://youtu.be/x :fire:')).toBe(
+      'watch https://youtu.be/x 🔥',
+    )
+  })
+
+  it('preserves newlines and runs of spaces exactly', () => {
+    expect(replaceShortcodes('a  :fire:\n\nb')).toBe('a  🔥\n\nb')
+  })
+
+  // Roughly a fifth of the map uses underscores, and none of the cases above
+  // would notice if `_` were dropped from the character class.
+  it('replaces a code containing an underscore', () => {
+    expect(replaceShortcodes(':heart_eyes:')).toBe('😍')
+  })
+
+  // `+1` exercises both the alias entries and the non-alphanumeric end of the
+  // character class.
+  it('replaces an alias code with punctuation', () => {
+    expect(replaceShortcodes('nice :+1:')).toBe('nice 👍')
+  })
+
   it('leaves a timestamp alone', () => {
     expect(replaceShortcodes('start at 1:30:00')).toBe('start at 1:30:00')
   })
@@ -143,20 +173,40 @@ Create `lib/emoji/replace.ts`:
 import {SHORTCODES} from './shortcodes'
 
 /**
- * The character class is the whole design. It admits only the characters a
- * shortcode can contain, which is what keeps ordinary text intact:
+ * The character class admits only what a shortcode can contain, which keeps
+ * most ordinary text intact on its own:
  *
- * - `https://youtu.be/x` — the colon is followed by `/`, which cannot start a
- *   code, so nothing matches.
  * - `1:30:00` — `:30:` matches the shape, finds no entry, and is returned
  *   verbatim by the fallback below. Unknown codes passing through is what
- *   makes a permissive pattern safe.
+ *   makes a permissive pattern tolerable.
  * - `wait: what` — a space cannot appear in a code, so a lone colon is inert.
  */
 const SHORTCODE = /:([a-z0-9_+-]+):/gi
 
+/** A whitespace-delimited token that is a link, and so must be left alone. */
+const URL_TOKEN = /^https?:\/\//i
+
 export function replaceShortcodes(text: string): string {
-  return text.replace(SHORTCODE, (whole, code: string) => SHORTCODES[code.toLowerCase()] ?? whole)
+  // URLs are skipped as whole tokens rather than pattern-matched around,
+  // because the character class alone does NOT protect them. It stops
+  // `https://youtu.be/x` only because the colon there is followed by `/` —
+  // but a colon later in a path is followed by ordinary word characters, so
+  // `http://x/:fire:` would otherwise become `http://x/🔥` and the link would
+  // break. Splitting on whitespace and skipping link tokens outright is both
+  // simpler to reason about and complete, where a lookbehind on `/` would
+  // still miss shapes like `https://x.com/a:fire:b`.
+  //
+  // The capture group in the split pattern keeps the separators in the array,
+  // so `join('')` restores the original spacing exactly — including newlines
+  // and runs of spaces.
+  return text
+    .split(/(\s+)/)
+    .map(token =>
+      URL_TOKEN.test(token)
+        ? token
+        : token.replace(SHORTCODE, (whole, code: string) => SHORTCODES[code.toLowerCase()] ?? whole),
+    )
+    .join('')
 }
 ```
 
@@ -179,13 +229,49 @@ Find where the composer calls `onSend` with the trimmed body, and wrap that valu
 
 with `import {replaceShortcodes} from '@/lib/emoji/replace'` at the top. Change nothing else — the existing `!e.nativeEvent.isComposing` guard and the trim/empty checks stay exactly as they are.
 
-- [ ] **Step 7: Verify and commit**
+- [ ] **Step 7: Cover the send path end to end**
 
-Run: `npm test && npx tsc --noEmit && npm run lint && npm run build`
+The unit tests all call `replaceShortcodes` directly, so deleting the call in
+`ChatComposer` leaves the whole suite green — the feature's headline behaviour
+is unprotected. This project has no component-test tooling and covers
+components with Playwright by convention, so the assertion belongs there.
+
+Add to `e2e/sync.spec.ts`, using the existing `startRoom` / `joinRoom` helpers:
+
+```ts
+test('a shortcode is sent as an emoji and reaches the other peer', async ({browser}) => {
+  const hostContext = await browser.newContext()
+  const guestContext = await browser.newContext()
+  const host = await hostContext.newPage()
+  const guest = await guestContext.newPage()
+
+  const room = await startRoom(host, 'zebra')
+  await joinRoom(guest, 'walrus', room)
+
+  await host.getByTestId('chat-input').fill('that was :haha:')
+  await host.getByTestId('chat-send').click()
+
+  // Asserted on the GUEST, not the sender: converting on send is what puts the
+  // emoji on the wire, so the receiving side is where that actually shows.
+  await expect(guest.getByTestId('chat-log')).toContainText('that was 😄')
+  await expect(guest.getByTestId('chat-log')).not.toContainText(':haha:')
+
+  await hostContext.close()
+  await guestContext.close()
+})
+```
+
+Match the surrounding tests' setup and teardown style — if they use a shared
+helper for creating the two contexts, use it rather than the inline form above.
+Chat needs no video, so this test should be quick.
+
+- [ ] **Step 8: Verify and commit**
+
+Run: `npm test && npx tsc --noEmit && npm run lint && npm run build && npx playwright test`
 Expected: all green, lint 0 errors and 0 warnings.
 
 ```bash
-git add lib/emoji components/ChatComposer.tsx
+git add lib/emoji components/ChatComposer.tsx e2e/sync.spec.ts
 git commit -m "feat: emoji shortcodes in chat"
 ```
 

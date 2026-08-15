@@ -7,9 +7,11 @@ import {replaceShortcodes} from '@/lib/emoji/replace'
 export function ChatComposer({
   onSend,
   gifSlot,
+  soundToggle,
 }: {
   onSend(body: string): void
   gifSlot?: React.ReactNode
+  soundToggle?: React.ReactNode
 }) {
   const [draft, setDraft] = useState('')
 
@@ -36,6 +38,7 @@ export function ChatComposer({
         data-testid="chat-input"
         className="min-w-0 flex-1 rounded-[var(--radius-md)] border border-border-strong bg-surface px-[var(--space-3)] py-[var(--space-2)] text-sm text-text placeholder:text-subtle"
       />
+      {soundToggle}
       {gifSlot}
       <button
         onClick={submit}

@@ -1,7 +1,7 @@
 'use client'
 
 import {useCallback, useEffect, useRef, useState} from 'react'
-import {SkipForward} from 'lucide-react'
+import {SkipForward, Volume2, VolumeX} from 'lucide-react'
 import {AddTrackForm} from './AddTrackForm'
 import {ChatComposer} from './ChatComposer'
 import {ChatPanel} from './ChatPanel'
@@ -14,6 +14,7 @@ import {TapToWatch} from './TapToWatch'
 import {Toasts, type Toast} from './Toasts'
 import {hasStoredNickname, loadNickname, saveNickname} from '@/lib/identity'
 import {diffRoster} from '@/lib/presence'
+import {loadSoundMuted, playNotification, saveSoundMuted} from '@/lib/sound/notify'
 import type {RosterEntry, Track, Unplayable} from '@/lib/sync/types'
 import {useRoom} from '@/lib/sync/use-room'
 import {useSyncPlayback} from '@/lib/sync/use-sync-playback'
@@ -149,6 +150,20 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
   const seenId = useRef<string | null>(null)
   const chatOpen = useRef(false)
 
+  const [muted, setMuted] = useState(false)
+  const mutedRef = useRef(false)
+
+  useEffect(() => {
+    // Same constraint as the nickname: localStorage does not exist on the
+    // server, so the stored preference can only be read after mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMuted(loadSoundMuted(window.localStorage))
+  }, [])
+
+  useEffect(() => {
+    mutedRef.current = muted
+  })
+
   // Keyed on the newest message's IDENTITY, not on `messages.length`. The
   // history is capped at CHAT_HISTORY_LIMIT, so past 200 messages the length
   // pins forever — and a dependency that stops changing is an effect that stops
@@ -164,9 +179,13 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
     if (!lastMessageId || lastMessageId === seenId.current) return
     const seenIndex = messages.findIndex(m => m.id === seenId.current)
     const added = messages.length - 1 - seenIndex
+    const newest = messages.at(-1)
     seenId.current = lastMessageId
     if (!chatOpen.current) setUnread(u => u + added)
-  }, [lastMessageId, messages])
+    // Only for other people's messages. A blip on your own send is not a
+    // notification, it is your own keystroke echoed back at you.
+    if (!mutedRef.current && newest && newest.peerId !== room.selfId) playNotification()
+  }, [lastMessageId, messages, room.selfId])
 
   const add = (track: Track) => room.send({type: 'enqueue', track})
 
@@ -320,6 +339,21 @@ export function Room({code, gifsEnabled}: {code: string; gifsEnabled: boolean}) 
               composer={
                 <ChatComposer
                   onSend={body => room.sendChat('text', body)}
+                  soundToggle={
+                    <button
+                      onClick={() => {
+                        const next = !muted
+                        setMuted(next)
+                        saveSoundMuted(window.localStorage, next)
+                      }}
+                      data-testid="sound-toggle"
+                      aria-pressed={muted}
+                      aria-label={muted ? 'Turn on message sounds' : 'Turn off message sounds'}
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius-md)] text-muted hover:bg-surface-raised hover:text-text cursor-pointer"
+                    >
+                      {muted ? <VolumeX size={18} aria-hidden /> : <Volume2 size={18} aria-hidden />}
+                    </button>
+                  }
                   gifSlot={
                     gifsEnabled ? (
                       <GifPicker onPick={url => room.sendChat('gif', url)} />
